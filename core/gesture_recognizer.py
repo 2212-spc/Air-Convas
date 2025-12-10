@@ -22,6 +22,7 @@ class GestureRecognizer:
         swipe_cooldown_frames: int = 20,
         history_len: int = 15,
         pinch_confirm_frames: int = 3,
+        pinch_release_confirm_frames: int = 1,  # 释放确认帧数，单独设置让断笔更快
     ) -> None:
         self.pinch_threshold = pinch_threshold
         self.pinch_release_threshold = pinch_release_threshold
@@ -32,6 +33,7 @@ class GestureRecognizer:
         self.pinch_active = False
         self.swipe_cooldown = 0
         self.pinch_confirm_frames = pinch_confirm_frames
+        self.pinch_release_confirm_frames = pinch_release_confirm_frames
         self._pinch_on_count = 0
         self._pinch_off_count = 0
 
@@ -93,17 +95,33 @@ class GestureRecognizer:
 
     def classify(self, hand: Hand) -> Dict:
         fingers = self.fingers_up(hand)
-        pinch_dist = point_distance(
-            hand.landmarks_norm[THUMB_TIP], hand.landmarks_norm[INDEX_TIP]
-        )
+
+        # 三指捏合检测（拇指+食指+中指）
+        thumb_tip = hand.landmarks_norm[THUMB_TIP]
+        index_tip = hand.landmarks_norm[INDEX_TIP]
+        middle_tip = hand.landmarks_norm[MIDDLE_TIP]
+
+        # 计算三对距离
+        dist_thumb_index = point_distance(thumb_tip, index_tip)
+        dist_thumb_middle = point_distance(thumb_tip, middle_tip)
+        dist_index_middle = point_distance(index_tip, middle_tip)
+
+        # 取最大距离作为判断依据（三指都要靠近）
+        max_dist = max(dist_thumb_index, dist_thumb_middle, dist_index_middle)
+        # 兼容性：保留原有的 pinch_dist（拇指-食指距离）
+        pinch_dist = dist_thumb_index
 
         pinch_start = False
         pinch_end = False
-        # 去抖逻辑
-        if pinch_dist < self.pinch_threshold:
+
+        # 三指捏合去抖逻辑：
+        # - 开始：三指都靠近（最大距离 < 阈值）
+        # - 结束：任意一对分开（最大距离 > 释放阈值）
+        if max_dist < self.pinch_threshold:
             self._pinch_on_count += 1
             self._pinch_off_count = 0
-        elif pinch_dist > self.pinch_release_threshold:
+        elif max_dist > self.pinch_release_threshold:
+            # 任意一指离开即可触发释放
             self._pinch_off_count += 1
             self._pinch_on_count = 0
         else:
@@ -114,7 +132,8 @@ class GestureRecognizer:
         if not self.pinch_active and self._pinch_on_count >= self.pinch_confirm_frames:
             self.pinch_active = True
             pinch_start = True
-        if self.pinch_active and self._pinch_off_count >= self.pinch_confirm_frames:
+        # 使用专用的释放确认帧数，让断笔更灵敏
+        if self.pinch_active and self._pinch_off_count >= self.pinch_release_confirm_frames:
             self.pinch_active = False
             pinch_end = True
 
@@ -122,12 +141,25 @@ class GestureRecognizer:
         fist = not any(fingers)
         index_only = fingers[1] and not any(fingers[i] for i in (0, 2, 3, 4))
         index_middle = fingers[1] and fingers[2] and not any(fingers[i] for i in (0, 3, 4))
+        # 三指竖起（食指+中指+无名指）= 粒子特效模式
+        three_fingers = fingers[1] and fingers[2] and fingers[3] and not fingers[0] and not fingers[4]
 
-        swipe = self._update_swipe(hand.landmarks_norm[0])
+        # 使用手掌中心而非手腕进行挥手检测（更准确）
+        # 手掌中心 = (手腕 + 食指根 + 小指根) / 3
+        wrist = hand.landmarks_norm[0]  # WRIST
+        index_mcp = hand.landmarks_norm[5]  # INDEX_MCP
+        pinky_mcp = hand.landmarks_norm[17]  # PINKY_MCP
+        palm_center = (
+            (wrist[0] + index_mcp[0] + pinky_mcp[0]) / 3,
+            (wrist[1] + index_mcp[1] + pinky_mcp[1]) / 3
+        )
+        swipe = self._update_swipe(palm_center)
 
         mode = "idle"
         if self.pinch_active:
             mode = "draw"
+        elif three_fingers:
+            mode = "particle"  # 粒子特效模式
         elif open_palm:
             mode = "erase"
         elif index_only:
@@ -146,6 +178,7 @@ class GestureRecognizer:
             "fist": fist,
             "index_only": index_only,
             "index_middle": index_middle,
+            "three_fingers": three_fingers,
             "mode": mode,
             "swipe": swipe,
             "pinch_distance": pinch_dist,

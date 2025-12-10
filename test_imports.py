@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """测试所有导入和基本功能"""
 
 import sys
 import traceback
+import io
+
+# Fix encoding for Windows console
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 def test_imports():
     """测试所有模块的导入"""
@@ -16,6 +22,9 @@ def test_imports():
         ("modules.eraser", lambda: __import__('modules.eraser', fromlist=['Eraser'])),
         ("modules.ppt_controller", lambda: __import__('modules.ppt_controller', fromlist=['PPTController'])),
         ("modules.shape_recognizer", lambda: __import__('modules.shape_recognizer', fromlist=['ShapeRecognizer'])),
+        ("modules.particle_system", lambda: __import__('modules.particle_system', fromlist=['ParticleSystem'])),
+        ("modules.laser_pointer", lambda: __import__('modules.laser_pointer', fromlist=['LaserPointer'])),
+        ("modules.palm_hud", lambda: __import__('modules.palm_hud', fromlist=['PalmHUD'])),
         ("utils.smoothing", lambda: __import__('utils.smoothing', fromlist=['EmaSmoother'])),
     ]
     

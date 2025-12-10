@@ -64,11 +64,23 @@ class ShapeRecognizer:
 
         contour = np.array(points, dtype=np.int32).reshape(-1, 1, 2)
 
+        # 关键修复：先清除原始笔迹区域
+        # 获取轮廓的边界框并扩大一些以确保完全覆盖
+        x, y, w, h = cv2.boundingRect(contour)
+        padding = thickness + 5  # 额外的边距
+        x1 = max(0, x - padding)
+        y1 = max(0, y - padding)
+        x2 = min(canvas_img.shape[1], x + w + padding)
+        y2 = min(canvas_img.shape[0], y + h + padding)
+
+        # 用黑色填充该区域，清除原始笔迹
+        cv2.rectangle(canvas_img, (x1, y1), (x2, y2), (0, 0, 0), -1)
+
+        # 现在绘制标准的几何图形
         if shape == "triangle":
             hull = cv2.convexHull(contour)
             cv2.polylines(canvas_img, [hull], True, color, thickness, lineType=cv2.LINE_AA)
         elif shape == "rectangle":
-            x, y, w, h = cv2.boundingRect(contour)
             cv2.rectangle(
                 canvas_img,
                 (x, y),
