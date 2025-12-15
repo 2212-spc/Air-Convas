@@ -20,7 +20,6 @@ def test_imports():
         ("modules.canvas", lambda: __import__('modules.canvas', fromlist=['Canvas'])),
         ("modules.virtual_pen", lambda: __import__('modules.virtual_pen', fromlist=['VirtualPen'])),
         ("modules.eraser", lambda: __import__('modules.eraser', fromlist=['Eraser'])),
-        ("modules.ppt_controller", lambda: __import__('modules.ppt_controller', fromlist=['PPTController'])),
         ("modules.shape_recognizer", lambda: __import__('modules.shape_recognizer', fromlist=['ShapeRecognizer'])),
         ("modules.particle_system", lambda: __import__('modules.particle_system', fromlist=['ParticleSystem'])),
         ("modules.laser_pointer", lambda: __import__('modules.laser_pointer', fromlist=['LaserPointer'])),

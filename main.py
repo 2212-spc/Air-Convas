@@ -16,7 +16,6 @@ from core.gesture_recognizer import GestureRecognizer
 from core.hand_detector import HandDetector, INDEX_TIP, THUMB_TIP, MIDDLE_TIP, WRIST
 from modules.canvas import Canvas
 from modules.eraser import Eraser
-from modules.ppt_controller import PPTController
 from modules.shape_recognizer import ShapeRecognizer
 from modules.virtual_pen import VirtualPen
 from modules.particle_system import ParticleSystem
@@ -110,7 +109,6 @@ def main() -> None:
         jump_threshold=getattr(config, 'STROKE_JUMP_THRESHOLD', 80),
     )
     eraser = Eraser(canvas, size=config.ERASER_SIZE)
-    ppt = PPTController()
     shape_recognizer = ShapeRecognizer()
 
     # 阶段四：AR增强效果
@@ -132,20 +130,10 @@ def main() -> None:
     last_time = time.time()
     frame_count = 0
     save_counter = 0
-    slide_counter = 1
 
     # 模式控制
-    PPT_MODE = False
-    last_erase_sent = False
     draw_lock = 0  # 捏合结束后短暂冷却，防误连笔
     DRAW_LOCK_FRAMES = getattr(config, 'DRAW_LOCK_FRAMES', 5)
-
-    # PPT工具模式：mouse（鼠标）/ pen（画笔）/ nav（翻页）
-    PPT_TOOL_MODES = ["mouse", "pen", "nav"]
-    current_ppt_tool = 0  # 0=mouse, 1=pen, 2=nav
-
-    # PPT鼠标状态追踪（避免重复mouseDown/mouseUp）
-    ppt_mouse_down = False
 
     # AR效果控制开关
     ENABLE_PARTICLES = True
@@ -222,9 +210,9 @@ def main() -> None:
                 if hasattr(gesture_ui, '_two_finger_triggered'):
                     gesture_ui._two_finger_triggered = False
 
-            # 更新UI悬停状态（非PPT模式时，在多种手势下都更新，包括食指指向、捏合准备和捏合中）
+            # 更新UI悬停状态（在多种手势下都更新，包括食指指向、捏合准备和捏合中）
             # 关键修复：不再限制为 index_only，让悬停在捏合过程中也能保持
-            if gesture_ui.visible and not PPT_MODE:
+            if gesture_ui.visible:
                 # 在非擦除、非拳头状态下都更新悬停检测
                 if not g["open_palm"] and not g["fist"]:
                     hover_item = gesture_ui.update_hover(draw_pt, brush_manager)
@@ -243,161 +231,56 @@ def main() -> None:
                     # 选择后短暂跳过绘图，避免选择时误画
                     draw_lock = DRAW_LOCK_FRAMES
 
-            # PPT模式 - 根据工具模式处理
-            if PPT_MODE and pyautogui:
-                ppt_tool = PPT_TOOL_MODES[current_ppt_tool]
+            # 本地Canvas模式
+            if g["pinch_start"]:
+                pen.start_stroke()
+                draw_lock = 0
 
-                if ppt_tool == "pen":
-                    # 画笔模式：捏合画图
-                    # 使用状态追踪避免重复mouseDown/mouseUp
-                    if g["pinching"] and not ppt_mouse_down:
-                        # 开始捏合，按下鼠标
-                        try:
-                            pyautogui.mouseDown()
-                            ppt_mouse_down = True
-                        except Exception:
-                            pass
-
-                    if g["pinching"] and ppt_mouse_down:
-                        # 持续捏合，移动鼠标（保持按下状态）
-                        try:
-                            pyautogui.moveTo(*screen_pt, duration=0, _pause=False)
-                        except (TypeError, Exception):
-                            try:
-                                pyautogui.moveTo(*screen_pt, duration=0)
-                            except Exception:
-                                pass
-
-                    if not g["pinching"] and ppt_mouse_down:
-                        # 结束捏合，释放鼠标
-                        try:
-                            pyautogui.mouseUp()
-                            ppt_mouse_down = False
-                        except Exception:
-                            pass
-
-                    # 张开手尝试切橡皮
-                    if g["open_palm"] and not last_erase_sent:
-                        try:
-                            pyautogui.hotkey('ctrl','e')
-                        except Exception:
-                            try:
-                                pyautogui.press('e')
-                            except Exception:
-                                pass
-                        last_erase_sent = True
-                    if not g["open_palm"]:
-                        last_erase_sent = False
-
-                elif ppt_tool == "mouse":
-                    # 鼠标模式：食指移动光标
-                    if g["index_only"]:
-                        try:
-                            pyautogui.moveTo(*screen_pt, duration=0, _pause=False)
-                        except (TypeError, Exception):
-                            try:
-                                pyautogui.moveTo(*screen_pt, duration=0)
-                            except Exception:
-                                pass
-
-                elif ppt_tool == "nav":
-                    # 翻页模式：只响应挥手
-                    pass  # 挥手在后面统一处理
-
-                # 不在本地Canvas绘图
+            if g["pinching"] and current_mode == "draw" and draw_lock == 0:
+                smoothed_pt = pen.draw(draw_pt)
+                # 绘图时不再自动发射粒子
+            elif g["three_fingers"] and current_mode == "particle":
+                # 三指模式：只发射粒子特效，不绘图
+                if ENABLE_PARTICLES:
+                    particle_system.emit(draw_pt, brush_manager.color)
+                pen.end_stroke()  # 确保不绘图
+            elif g["open_palm"]:
+                eraser.erase(erase_pt)
                 pen.end_stroke()
-
-            elif PPT_MODE and not pyautogui:
-                # PPT模式但没有pyautogui
+            elif g["index_only"]:
                 pen.end_stroke()
-            else:
-                # 本地Canvas模式
-                if g["pinch_start"]:
-                    pen.start_stroke()
-                    draw_lock = 0
-
-                if g["pinching"] and current_mode == "draw" and draw_lock == 0:
-                    smoothed_pt = pen.draw(draw_pt)
-                    # 绘图时不再自动发射粒子
-                elif g["three_fingers"] and current_mode == "particle":
-                    # 三指模式：只发射粒子特效，不绘图
-                    if ENABLE_PARTICLES:
-                        particle_system.emit(draw_pt, brush_manager.color)
-                    pen.end_stroke()  # 确保不绘图
-                elif g["open_palm"]:
-                    eraser.erase(erase_pt)
-                    pen.end_stroke()
-                elif g["index_only"]:
-                    pen.end_stroke()
-                    # 更新激光笔拖尾
-                    if ENABLE_LASER:
-                        laser_trail.append(draw_pt)
-                        if len(laser_trail) > max_trail_length:
-                            laser_trail.pop(0)
-                    if pyautogui:
-                        try:
-                            pyautogui.moveTo(*screen_pt, duration=0, _pause=False)
-                        except TypeError:
-                            pyautogui.moveTo(*screen_pt, duration=0)
-                elif g["fist"]:
-                    pen.end_stroke()
-
-                # 关键修复：捏合结束时处理笔画
-                if g["pinch_end"]:
-                    finished_points = pen.end_stroke()
-                    draw_lock = DRAW_LOCK_FRAMES  # 使用配置的冷却帧数
-                    if finished_points:
-                        shape_recognizer.beautify(
-                            finished_points,
-                            canvas.get_canvas(),
-                            brush_manager.color,
-                            brush_manager.thickness,
-                        )
-
-            # 手势翻页
-            if g["swipe"]:
-                # PPT模式下，只在nav模式或非特定工具模式时翻页
-                if PPT_MODE and pyautogui and (PPT_TOOL_MODES[current_ppt_tool] == "nav" or not PPT_MODE):
+                # 更新激光笔拖尾
+                if ENABLE_LASER:
+                    laser_trail.append(draw_pt)
+                    if len(laser_trail) > max_trail_length:
+                        laser_trail.pop(0)
+                if pyautogui:
                     try:
-                        if g["swipe"] == "SWIPE_RIGHT":
-                            pyautogui.press('right')
-                            slide_counter += 1
-                        elif g["swipe"] == "SWIPE_LEFT":
-                            pyautogui.press('left')
-                            slide_counter = max(1, slide_counter - 1)
-                        elif g["swipe"] == "SWIPE_UP":
-                            pyautogui.press('home')
-                            slide_counter = 1
-                        elif g["swipe"] == "SWIPE_DOWN":
-                            pyautogui.press('end')
-                    except Exception:
-                        pass
-                else:
-                    if g["swipe"] == "SWIPE_RIGHT":
-                        ppt.next_slide()
-                        slide_counter += 1
-                    elif g["swipe"] == "SWIPE_LEFT":
-                        ppt.prev_slide()
-                        slide_counter = max(1, slide_counter - 1)
-                    elif g["swipe"] == "SWIPE_UP":
-                        ppt.first_slide()
-                        slide_counter = 1
-                    elif g["swipe"] == "SWIPE_DOWN":
-                        ppt.last_slide()
-                        slide_counter = max(slide_counter, 1)
+                        pyautogui.moveTo(*screen_pt, duration=0, _pause=False)
+                    except TypeError:
+                        pyautogui.moveTo(*screen_pt, duration=0)
+            elif g["fist"]:
+                pen.end_stroke()
+
+            # 关键修复：捏合结束时处理笔画
+            if g["pinch_end"]:
+                finished_points = pen.end_stroke()
+                draw_lock = DRAW_LOCK_FRAMES  # 使用配置的冷却帧数
+                if finished_points:
+                    shape_recognizer.beautify(
+                        finished_points,
+                        canvas.get_canvas(),
+                        brush_manager.color,
+                        brush_manager.thickness,
+                    )
+
 
             detector.draw_hand(frame, hand)
         else:
-            # 无手时强制断笔；PPT模式下释放鼠标
+            # 无手时强制断笔
             pen.end_stroke()
             laser_trail.clear()
             palm_hud.reset()
-            if PPT_MODE and pyautogui and ppt_mouse_down:
-                try:
-                    pyautogui.mouseUp()
-                    ppt_mouse_down = False
-                except Exception:
-                    pass
 
         # ========== 阶段四：AR增强效果渲染 ==========
 
@@ -443,9 +326,8 @@ def main() -> None:
             last_time = now
 
         # 状态信息
-        ppt_tool_text = f" [{PPT_TOOL_MODES[current_ppt_tool].upper()}]" if PPT_MODE else ""
         status_lines = [
-            f"Mode: {current_mode} | PPT:{'ON' if PPT_MODE else 'OFF'}{ppt_tool_text} | FPS: {fps:.1f} | Slide: {slide_counter}",
+            f"Mode: {current_mode} | FPS: {fps:.1f}",
             brush_manager.get_status_text(),  # 笔刷信息
         ]
 
@@ -476,14 +358,12 @@ def main() -> None:
                 "  Open palm: Erase",
                 "  Index only: Laser / UI hover",
                 "  Fist: Pause",
-                "  Swipe: PPT navigation",
                 "Gesture UI:",
                 "  2 fingers: Show/Hide UI",
                 "  Index: Hover over buttons",
                 "  Pinch: Select button",
                 "Keyboard:",
                 "  q: Quit  c: Clear  s: Save",
-                "  f: PPT mode  t: PPT tool",
                 "  w: Fullscreen  h: Help",
                 "  [ / ]: Color  - / +: Size",
                 "  b: Brush type",
@@ -512,33 +392,6 @@ def main() -> None:
             canvas.save(str(out_path))
             print(f"Saved canvas to {out_path}")
             save_counter += 1
-        if key == ord('f'):
-            # 切换PPT模式
-            PPT_MODE = not PPT_MODE
-            pen.end_stroke()
-            last_erase_sent = False
-            ppt_mouse_down = False  # 重置鼠标状态
-            print(f"PPT Mode: {'ON' if PPT_MODE else 'OFF'} - Tool: {PPT_TOOL_MODES[current_ppt_tool]}")
-        if key == ord('t') and PPT_MODE:
-            # 在PPT模式下切换工具
-            current_ppt_tool = (current_ppt_tool + 1) % len(PPT_TOOL_MODES)
-            pen.end_stroke()
-            last_erase_sent = False
-            ppt_mouse_down = False  # 重置鼠标状态
-            tool_name = PPT_TOOL_MODES[current_ppt_tool]
-            print(f"PPT Tool switched to: {tool_name.upper()}")
-
-            # 根据工具切换PPT状态
-            if pyautogui:
-                try:
-                    if tool_name == "pen":
-                        pyautogui.hotkey('ctrl','p')  # PPT画笔
-                    elif tool_name == "mouse":
-                        pyautogui.hotkey('ctrl','a')  # PPT箭头指针
-                    elif tool_name == "nav":
-                        pyautogui.press('esc')  # 退出画笔模式
-                except Exception:
-                    pass
         if key == ord('1'):
             # 切换粒子效果
             ENABLE_PARTICLES = not ENABLE_PARTICLES

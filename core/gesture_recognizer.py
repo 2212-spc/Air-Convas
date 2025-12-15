@@ -1,3 +1,4 @@
+import math
 from collections import deque
 from typing import Deque, Dict, List, Optional
 
@@ -15,13 +16,13 @@ from core.hand_detector import distance as point_distance
 class GestureRecognizer:
     def __init__(
         self,
-        pinch_threshold: float,
-        pinch_release_threshold: float,
-        swipe_threshold: float,
-        swipe_velocity_threshold: float = 0.015,
-        swipe_cooldown_frames: int = 20,
-        history_len: int = 15,
-        pinch_confirm_frames: int = 3,
+        pinch_threshold: float,#三指捏合阈值
+        pinch_release_threshold: float,#三指捏合释放阈值
+        swipe_threshold: float,#挥手阈值
+        swipe_velocity_threshold: float = 0.015,#挥手速度阈值
+        swipe_cooldown_frames: int = 20,#挥手冷却帧数
+        history_len: int = 15,#挥手历史帧数
+        pinch_confirm_frames: int = 3,#捏合确认帧数
         pinch_release_confirm_frames: int = 1,  # 释放确认帧数，单独设置让断笔更快
     ) -> None:
         self.pinch_threshold = pinch_threshold
@@ -30,23 +31,25 @@ class GestureRecognizer:
         self.swipe_velocity_threshold = swipe_velocity_threshold
         self.swipe_cooldown_frames = swipe_cooldown_frames
         self.history: Deque[tuple] = deque(maxlen=history_len)
-        self.pinch_active = False
+        self.pinch_active = False#捏合状态
         self.swipe_cooldown = 0
-        self.pinch_confirm_frames = pinch_confirm_frames
-        self.pinch_release_confirm_frames = pinch_release_confirm_frames
-        self._pinch_on_count = 0
-        self._pinch_off_count = 0
+        self.pinch_confirm_frames = pinch_confirm_frames#捏合确认帧数
+        self.pinch_release_confirm_frames = pinch_release_confirm_frames#捏合释放确认帧数
+        self._pinch_on_count = 0#捏合开启计数
+        self._pinch_off_count = 0#捏合关闭计数
 
     def _thumb_up(self, hand: Hand) -> bool:
-        tip_x, _ = hand.landmarks_norm[THUMB_TIP]
-        base_x, _ = hand.landmarks_norm[THUMB_TIP - 1]
+        tip_x, _ = hand.landmarks_norm[THUMB_TIP]#拇指尖x坐标
+        base_x, _ = hand.landmarks_norm[THUMB_TIP - 1]#拇指基部x坐标
+        #判断拇指是否向上
         if hand.handedness == "LEFT":
             return tip_x < base_x
         return tip_x > base_x
 
     def _finger_up(self, hand: Hand, tip_idx: int) -> bool:
-        tip_y = hand.landmarks_norm[tip_idx][1]
-        base_y = hand.landmarks_norm[tip_idx - 2][1]
+        tip_y = hand.landmarks_norm[tip_idx][1]#指尖y坐标
+        base_y = hand.landmarks_norm[tip_idx - 2][1]#指基部y坐标
+        #判断手指是否向上
         return tip_y < base_y
 
     def fingers_up(self, hand: Hand) -> List[bool]:
@@ -58,30 +61,30 @@ class GestureRecognizer:
             self._finger_up(hand, PINKY_TIP),
         ]
 
-    def _update_swipe(self, wrist_xy: tuple) -> Optional[str]:
-        self.history.append(wrist_xy)
+    def _update_swipe(self, wrist_xy: tuple) -> Optional[str]:#更新挥手
+        self.history.append(wrist_xy)#将手腕坐标添加到历史帧数中
         if len(self.history) < self.history.maxlen:
-            return None
+            return None#如果历史帧数小于最大历史帧数，返回None
         if self.swipe_cooldown > 0:
-            self.swipe_cooldown -= 1
-            return None
+            self.swipe_cooldown -= 1#如果挥手冷却帧数大于0，挥手冷却帧数减1
+            return None#如果挥手冷却帧数大于0，返回None
 
-        # 使用“最近5帧均值 - 最早5帧均值”
+        # 使用“最近5帧均值 - 最早5帧均值”计算位移
         n = len(self.history)
         k = max(5, n // 3)
-        xs = [p[0] for p in self.history]
-        ys = [p[1] for p in self.history]
-        x0 = sum(xs[:k]) / k
-        y0 = sum(ys[:k]) / k
-        x1 = sum(xs[-k:]) / k
-        y1 = sum(ys[-k:]) / k
-        dx, dy = x1 - x0, y1 - y0
+        xs = [p[0] for p in self.history]#x坐标列表
+        ys = [p[1] for p in self.history]#y坐标列表
+        x0 = sum(xs[:k]) / k#x0坐标
+        y0 = sum(ys[:k]) / k#y0坐标
+        x1 = sum(xs[-k:]) / k#x1坐标
+        y1 = sum(ys[-k:]) / k#y1坐标
+        dx, dy = x1 - x0, y1 - y0#x轴位移和y轴位移
 
         # 位移阈值
-        if abs(dx) < self.swipe_threshold and abs(dy) < self.swipe_threshold:
+        if abs(dx) < self.swipe_threshold and abs(dy) < self.swipe_threshold:#如果x轴位移和y轴位移小于阈值，返回None，判定没有挥手
             return None
-        # 速度阈值（单位：每帧归一化位移）
-        speed = (abs(dx) + abs(dy)) / max(n - 1, 1)
+        # 速度阈值（单位：每帧归一化位移）；使用欧氏距离并按有效间隔归一化，减少抖动误触
+        speed = math.hypot(dx, dy) / max(n - k, 1)
         if speed < self.swipe_velocity_threshold:
             return None
 
