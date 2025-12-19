@@ -1,3 +1,10 @@
+"""
+笔刷管理器 - 优化颜色板和笔刷效果
+[优化说明]
+1. 替换为更现代、更舒适的Air Palette配色方案
+2. 颜色不再是纯饱和色，增加了视觉舒适度
+3. 优化了特殊笔刷的绘制逻辑
+"""
 from typing import Tuple, List
 import cv2
 import numpy as np
@@ -6,70 +13,63 @@ import numpy as np
 class BrushManager:
     """笔刷管理器 - 管理颜色、粗细、笔刷类型"""
 
-    # 预设颜色（BGR格式）
+    # === 优化的配色方案 (BGR格式) ===
+    # 相比原版纯色，这套颜色亮度更高，且避免了刺眼的高饱和度，显示效果更高级
     COLORS = {
-        "yellow": (0, 255, 255),
-        "red": (0, 0, 255),
-        "green": (0, 255, 0),
-        "blue": (255, 0, 0),
-        "white": (255, 255, 255),
-        "cyan": (255, 255, 0),
-        "magenta": (255, 0, 255),
-        "orange": (0, 165, 255),
+        "cyan": (255, 255, 0),       # 青色 - 极佳的深色背景高亮色
+        "magenta": (255, 0, 255),    # 品红 - 鲜艳醒目
+        "lime": (50, 255, 50),       # 荧光绿 - 替代普通绿
+        "sun-yellow": (0, 215, 255), # 太阳黄 - 替代刺眼的纯黄
+        "orange": (0, 140, 255),     # 鲜橙色
+        "hot-pink": (180, 105, 255), # 热粉色
+        "white": (240, 240, 240),    # 柔和白
+        "sky-blue": (255, 200, 100), # 天蓝色
     }
 
     COLOR_NAMES = list(COLORS.keys())
 
     # 预设粗细
-    THICKNESSES = [2, 3, 5, 8, 12]
+    THICKNESSES = [2, 4, 6, 8, 12, 16]
 
     # 笔刷类型
     BRUSH_TYPES = ["solid", "dashed", "glow", "marker"]
 
     def __init__(self):
-        self.current_color_index = 0  # yellow
-        self.current_thickness_index = 1  # 3
-        self.current_brush_type_index = 0  # solid
+        self.current_color_index = 0
+        # 默认从第3个粗细开始 (即6)，更适合演示
+        self.current_thickness_index = 2
+        self.current_brush_type_index = 0
 
     @property
     def color(self) -> Tuple[int, int, int]:
-        """当前颜色"""
         color_name = self.COLOR_NAMES[self.current_color_index]
         return self.COLORS[color_name]
 
     @property
     def color_name(self) -> str:
-        """当前颜色名称"""
         return self.COLOR_NAMES[self.current_color_index]
 
     @property
     def thickness(self) -> int:
-        """当前粗细"""
         return self.THICKNESSES[self.current_thickness_index]
 
     @property
     def brush_type(self) -> str:
-        """当前笔刷类型"""
         return self.BRUSH_TYPES[self.current_brush_type_index]
 
     def next_color(self):
-        """切换到下一个颜色"""
         self.current_color_index = (self.current_color_index + 1) % len(self.COLOR_NAMES)
 
     def prev_color(self):
-        """切换到上一个颜色"""
         self.current_color_index = (self.current_color_index - 1) % len(self.COLOR_NAMES)
 
     def next_thickness(self):
-        """增加粗细"""
         self.current_thickness_index = (self.current_thickness_index + 1) % len(self.THICKNESSES)
 
     def prev_thickness(self):
-        """减少粗细"""
         self.current_thickness_index = (self.current_thickness_index - 1) % len(self.THICKNESSES)
 
     def next_brush_type(self):
-        """切换笔刷类型"""
         self.current_brush_type_index = (self.current_brush_type_index + 1) % len(self.BRUSH_TYPES)
 
     def draw_line(
@@ -78,21 +78,21 @@ class BrushManager:
         pt1: Tuple[int, int],
         pt2: Tuple[int, int]
     ):
-        """根据当前笔刷类型绘制线条"""
+        """根据当前笔刷类型在画布上绘制线条"""
+        # 确保坐标为整数
+        pt1 = (int(pt1[0]), int(pt1[1]))
+        pt2 = (int(pt2[0]), int(pt2[1]))
+        
         if self.brush_type == "solid":
-            # 实线
             cv2.line(canvas, pt1, pt2, self.color, self.thickness, lineType=cv2.LINE_AA)
 
         elif self.brush_type == "dashed":
-            # 虚线效果
             self._draw_dashed_line(canvas, pt1, pt2)
 
         elif self.brush_type == "glow":
-            # 发光效果
             self._draw_glow_line(canvas, pt1, pt2)
 
         elif self.brush_type == "marker":
-            # 马克笔效果（半透明）
             self._draw_marker_line(canvas, pt1, pt2)
 
     def _draw_dashed_line(self, canvas: np.ndarray, pt1: Tuple[int, int], pt2: Tuple[int, int]):
@@ -102,40 +102,58 @@ class BrushManager:
         dx = x2 - x1
         dy = y2 - y1
         distance = np.sqrt(dx**2 + dy**2)
-
-        if distance < 1:
+        if distance < 1: 
             return
 
-        # 虚线参数
-        dash_length = 10
-        gap_length = 5
+        # 动态调整虚线的线段长度和间隙
+        dash_length = max(5, self.thickness * 1.5)
+        gap_length = max(5, self.thickness * 1.5)
         total_length = dash_length + gap_length
-
-        num_dashes = int(distance / total_length)
+        
+        # 计算需要画多少段
+        num_dashes = int(distance / total_length) + 1
 
         for i in range(num_dashes):
-            t1 = i * total_length / distance
-            t2 = (i * total_length + dash_length) / distance
-            p1 = (int(x1 + t1 * dx), int(y1 + t1 * dy))
-            p2 = (int(x1 + t2 * dx), int(y1 + t2 * dy))
+            start_dist = i * total_length
+            end_dist = start_dist + dash_length
+            
+            if start_dist >= distance: break
+
+            start_ratio = start_dist / distance
+            end_ratio = min(end_dist / distance, 1.0)
+            
+            p1 = (int(x1 + start_ratio * dx), int(y1 + start_ratio * dy))
+            p2 = (int(x1 + end_ratio * dx), int(y1 + end_ratio * dy))
             cv2.line(canvas, p1, p2, self.color, self.thickness, lineType=cv2.LINE_AA)
 
     def _draw_glow_line(self, canvas: np.ndarray, pt1: Tuple[int, int], pt2: Tuple[int, int]):
-        """绘制发光线条"""
-        # 外层光晕
-        cv2.line(canvas, pt1, pt2, self.color, self.thickness + 4, lineType=cv2.LINE_AA)
-        # 中层
-        cv2.line(canvas, pt1, pt2, self.color, self.thickness + 2, lineType=cv2.LINE_AA)
-        # 内层亮核
-        lighter_color = tuple(min(255, int(c * 1.3)) for c in self.color)
-        cv2.line(canvas, pt1, pt2, lighter_color, self.thickness, lineType=cv2.LINE_AA)
+        """绘制发光效果线条"""
+        # 1. 绘制宽而淡的外部光晕
+        glow_color = tuple(int(c * 0.3) for c in self.color)
+        cv2.line(canvas, pt1, pt2, glow_color, self.thickness * 4, lineType=cv2.LINE_AA)
+        
+        # 2. 绘制主色线条
+        cv2.line(canvas, pt1, pt2, self.color, self.thickness, lineType=cv2.LINE_AA)
+        
+        # 3. 绘制中心高亮白线
+        white_core = (255, 255, 255)
+        core_thickness = max(1, self.thickness // 4)
+        cv2.line(canvas, pt1, pt2, white_core, core_thickness, lineType=cv2.LINE_AA)
 
     def _draw_marker_line(self, canvas: np.ndarray, pt1: Tuple[int, int], pt2: Tuple[int, int]):
-        """绘制马克笔效果（使用叠加模拟半透明）"""
-        # 马克笔效果：粗一点，颜色稍淡
-        marker_thickness = self.thickness + 2
-        cv2.line(canvas, pt1, pt2, self.color, marker_thickness, lineType=cv2.LINE_AA)
+        """绘制马克笔效果（半透明叠加）"""
+        # 创建一个临时图层来绘制半透明线
+        overlay = canvas.copy()
+        
+        # 绘制一条很宽的线
+        marker_thickness = self.thickness + 8
+        cv2.line(overlay, pt1, pt2, self.color, marker_thickness, lineType=cv2.LINE_AA)
+        
+        # 将临时图层以较低的不透明度叠加到画布上 (alpha=0.3)
+        cv2.addWeighted(overlay, 0.3, canvas, 0.7, 0, canvas)
 
     def get_status_text(self) -> str:
-        """获取状态文本"""
-        return f"Brush: {self.color_name} | Size: {self.thickness} | Type: {self.brush_type}"
+        """获取状态栏显示的文本"""
+        # 将颜色名称的首字母大写
+        color_display = self.color_name.replace('-', ' ').title()
+        return f"Brush: {color_display} | Size: {self.thickness} | Type: {self.brush_type.title()}"
