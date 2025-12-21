@@ -43,8 +43,8 @@ FINGER_EXTEND_TOLERANCE = 0.1  # 约10%的容差
 # 指尖到关节的距离必须大于此值才认为手指真正伸直
 FINGER_EXTEND_DISTANCE_THRESHOLD = 0.03  # 至少3%的距离
 
-# 三指捏合判定阈值 (像素距离) - 较小的值使检测更精确
-PINCH_THRESHOLD = 45  # 降低阈值，使三指捏合检测更精确
+# 相对捏合阈值 (捏合距离 / 手掌宽度) - 动态适应远近
+PINCH_RATIO_THRESHOLD = 0.25  # 捏合距离小于手掌宽度的25%认为捏合
 
 # 挥手判定阈值 (归一化坐标，0.0~1.0)
 # 使用归一化坐标适配不同分辨率
@@ -555,8 +555,8 @@ class HandController:
                         print("已通过COM接口切换到橡皮模式")
                         return
                 elif self.current_mode == MODE_NAV:
-                    if self.ppt_controller.set_pointer_type(1):  # 箭头
-                        print("已通过COM接口切换到箭头模式")
+                    if self.ppt_controller.set_pointer_type(3):  # 激光笔 (PointerType=3)
+                        print("已通过COM接口切换到激光笔模式")
                         return
         
         # 降级方案：使用模拟按键
@@ -566,38 +566,53 @@ class HandController:
             elif self.current_mode == MODE_ERASER:
                 pyautogui.hotkey('ctrl', 'e')
             elif self.current_mode == MODE_NAV:
-                pyautogui.hotkey('ctrl', 'a')
+                pyautogui.hotkey('ctrl', 'l')  # 激光笔快捷键
         except Exception as e:
             print(f"快捷键执行失败: {e}")
 
     def check_pinch(self, landmarks, h, w):
-        """检测拇指、食指、中指三指捏合"""
+        """检测拇指、食指、中指三指捏合 (使用相对阈值)"""
         # 获取三指指尖坐标
         # landmarks 可能是原始MediaPipe对象或滤波后的列表
         if hasattr(landmarks, 'landmark'):
             thumb = landmarks.landmark[4]   # 拇指尖
             index = landmarks.landmark[8]    # 食指尖
             middle = landmarks.landmark[12]  # 中指尖
+            index_mcp = landmarks.landmark[5]   # 食指MCP
+            pinky_mcp = landmarks.landmark[17]  # 小指MCP
         else:
             # 滤波后的列表格式
             thumb = landmarks[4]
             index = landmarks[8]
             middle = landmarks[12]
+            # 注意: 滤波后的landmarks可能没有包含所有21个点，但我们在init里是对所有21个点滤波的
+            # 所以应该可以索引到
+            try:
+                index_mcp = landmarks[5]
+                pinky_mcp = landmarks[17]
+            except IndexError:
+                # 如果只有部分点，回退到绝对阈值逻辑（理论上不会发生）
+                return False
 
-        # 转换为像素坐标
-        thumb_px = (thumb.x * w, thumb.y * h)
-        index_px = (index.x * w, index.y * h)
-        middle_px = (middle.x * w, middle.y * h)
+        # 计算手掌参考宽度 (食指MCP到小指MCP)
+        # 使用归一化坐标计算，不依赖分辨率
+        palm_width = math.hypot(index_mcp.x - pinky_mcp.x, index_mcp.y - pinky_mcp.y)
+        
+        if palm_width < 1e-6:
+            return False
 
-        # 计算三个指尖之间的距离
-        dist_thumb_index = math.hypot(thumb_px[0] - index_px[0], thumb_px[1] - index_px[1])
-        dist_thumb_middle = math.hypot(thumb_px[0] - middle_px[0], thumb_px[1] - middle_px[1])
-        dist_index_middle = math.hypot(index_px[0] - middle_px[0], index_px[1] - middle_px[1])
+        # 计算三个指尖之间的距离 (归一化坐标)
+        dist_thumb_index = math.hypot(thumb.x - index.x, thumb.y - index.y)
+        dist_thumb_middle = math.hypot(thumb.x - middle.x, thumb.y - middle.y)
+        dist_index_middle = math.hypot(index.x - middle.x, index.y - middle.y)
 
-        # 三指捏合：三个指尖之间的距离都要小于阈值
-        is_pinching = (dist_thumb_index < PINCH_THRESHOLD and
-                      dist_thumb_middle < PINCH_THRESHOLD and
-                      dist_index_middle < PINCH_THRESHOLD)
+        # 归一化捏合阈值
+        threshold = palm_width * PINCH_RATIO_THRESHOLD
+
+        # 三指捏合：三个指尖之间的距离都要小于相对阈值
+        is_pinching = (dist_thumb_index < threshold and
+                      dist_thumb_middle < threshold and
+                      dist_index_middle < threshold)
 
         return is_pinching
 
@@ -772,9 +787,9 @@ if __name__ == "__main__":
     print("手势说明:")
     print("  只有食指: 画笔模式 (PEN)")
     print("  食指+中指: 橡皮模式 (ERASER)")
-    print("  食指+中指+无名指: 导航模式 (NAV)")
+    print("  食指+中指+无名指: 导航/激光笔模式 (NAV/LASER)")
     print("  拇指+食指+中指三指捏合: 开始绘制/擦除")
-    print("  导航模式下左右挥手: 翻页（不控制光标）")
+    print("  导航模式下左右挥手: 翻页")
     print("=" * 60)
     print("按 'q' 退出")
 
