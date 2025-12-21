@@ -10,6 +10,7 @@ import time
 import math
 import numpy as np
 from collections import deque
+from core.coordinate_mapper import CoordinateMapper
 
 # COM接口支持
 try:
@@ -43,8 +44,8 @@ FINGER_EXTEND_TOLERANCE = 0.1  # 约10%的容差
 # 指尖到关节的距离必须大于此值才认为手指真正伸直
 FINGER_EXTEND_DISTANCE_THRESHOLD = 0.03  # 至少3%的距离
 
-# 三指捏合判定阈值 (像素距离) - 较小的值使检测更精确
-PINCH_THRESHOLD = 45  # 降低阈值，使三指捏合检测更精确
+# 相对捏合阈值 (捏合距离 / 手掌宽度) - 动态适应远近
+PINCH_RATIO_THRESHOLD = 0.25  # 捏合距离小于手掌宽度的25%认为捏合
 
 # 挥手判定阈值 (归一化坐标，0.0~1.0)
 # 使用归一化坐标适配不同分辨率
@@ -216,17 +217,22 @@ class OneEuroFilter:
         self.t_prev = None
 
 
-class HandController:
-    def __init__(self):
+class PPTGestureController:
+    def __init__(self, external_mp=False, cursor_mapper=None):
         # 1. 初始化 MediaPipe
+        self.external_mp = external_mp
         self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.7,
-            min_tracking_confidence=0.7  # 提升到0.7，确保高质量跟踪
-        )
         self.mp_draw = mp.solutions.drawing_utils
+        
+        if not external_mp:
+            self.hands = self.mp_hands.Hands(
+                static_image_mode=False,
+                max_num_hands=1,
+                min_detection_confidence=0.7,
+                min_tracking_confidence=0.7  # 提升到0.7，确保高质量跟踪
+            )
+        else:
+            self.hands = None
 
         # 2. 状态变量
         self.current_mode = MODE_NAV  # 默认模式
@@ -248,6 +254,17 @@ class HandController:
         # 6. PPT控制器（COM接口）
         self.ppt_controller = PPTController()
 
+        # 7. 高级坐标映射器 (与绘图模式一致)
+        if cursor_mapper:
+             self.cursor_mapper = cursor_mapper
+        else:
+             # 如果没有注入，使用默认全屏区域
+            self.cursor_mapper = CoordinateMapper(
+                (SCREEN_WIDTH, SCREEN_HEIGHT),
+                (0.0, 0.0, 1.0, 1.0),
+                smoothing_factor=0.15  # 与主程序绘图光标平滑度一致
+            )
+
         # 5. 鼠标状态追踪
         self.mouse_down = False
         
@@ -264,23 +281,27 @@ class HandController:
         # 7. 状态机迟滞：连续帧确认机制
         self.gesture_history = deque(maxlen=GESTURE_CONFIRM_FRAMES)
         self.confirmed_gesture = MODE_NONE
+        
+        # 调试变量
+        self.last_pinch_ratio = 0.0
 
     def get_distance(self, p1, p2):
         """计算两点欧几里得距离"""
         return math.hypot(p1.x - p2.x, p1.y - p2.y)
 
     def process_frame(self, frame):
-        """核心处理循环"""
+        """
+        核心处理循环 (独立运行模式)
+        内部自行调用 MediaPipe 处理
+        """
+        if self.external_mp:
+            raise RuntimeError("Instance initialized with external_mp=True, use process_hand_data instead.")
+            
         # 镜像翻转，符合直觉
         frame = cv2.flip(frame, 1)
         h, w, _ = frame.shape
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
-
-        current_time = time.time()
-        dt = current_time - self.last_time
-        self.last_time = current_time
-
 
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
@@ -288,105 +309,141 @@ class HandController:
                 self.mp_draw.draw_landmarks(
                     frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS
                 )
-
-                # --- 🟢 模块一: 视觉感知 (识别手势) ---
-                # 对关键点进行OneEuroFilter滤波，消除抖动
-                filtered_landmarks = self.filter_landmarks(hand_landmarks, current_time)
-                detected_gesture = self.recognize_gesture(filtered_landmarks, h, w)
-
-                # --- 🔵 模块二: 状态机 (带时间缓冲的模式切换) ---
-                # 状态机迟滞：连续N帧确认才更新状态
-                self.gesture_history.append(detected_gesture)
-                if len(self.gesture_history) == GESTURE_CONFIRM_FRAMES:
-                    # 检查是否所有帧都是同一手势
-                    if len(set(self.gesture_history)) == 1:
-                        self.confirmed_gesture = detected_gesture
-                    # 如果历史记录满了但手势不一致，清空重新开始
-                    elif len(set(self.gesture_history)) > 1:
-                        self.gesture_history.clear()
                 
-                # 注意: 如果正在捏合(写字中)，则锁定模式切换
-                is_pinching = self.check_pinch(filtered_landmarks, h, w)
-
-                if not is_pinching:
-                    # 使用确认的手势进行模式切换
-                    self.update_mode(self.confirmed_gesture, dt)
-
-                # --- 🟠 模块三: 执行层 (平滑 & 动作) ---
-                # 注意：执行层仍使用原始landmarks，因为滤波后的landmarks是列表格式
-                self.execute_action(hand_landmarks, is_pinching, w, h)
-
-                # --- UI 反馈 ---
-                mode_name = self.get_mode_name()
-                cv2.putText(
-                    frame, f"Mode: {mode_name}", (10, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2
-                )
-                cv2.putText(
-                    frame, f"Timer: {self.gesture_timer:.1f}s", (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
-                )
-                # 显示检测到的手势和确认的手势
-                detected_name = self._get_mode_name_from_gesture(detected_gesture)
-                confirmed_name = self._get_mode_name_from_gesture(self.confirmed_gesture)
-                cv2.putText(
-                    frame, f"Detected: {detected_name}", (10, 170),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2
-                )
-                cv2.putText(
-                    frame, f"Confirmed: {confirmed_name}", (10, 200),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
-                )
-                
-                # 显示三指捏合状态和距离信息
-                if is_pinching:
-                    cv2.putText(
-                        frame, "3-FINGER PINCH", (10, 130),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
-                    )
-                    # 在画面上绘制三指连接线，可视化捏合状态
-                    thumb = hand_landmarks.landmark[4]
-                    index = hand_landmarks.landmark[8]
-                    middle = hand_landmarks.landmark[12]
-                    
-                    thumb_pt = (int(thumb.x * w), int(thumb.y * h))
-                    index_pt = (int(index.x * w), int(index.y * h))
-                    middle_pt = (int(middle.x * w), int(middle.y * h))
-                    
-                    # 绘制连接线
-                    cv2.line(frame, thumb_pt, index_pt, (0, 255, 0), 2)
-                    cv2.line(frame, thumb_pt, middle_pt, (0, 255, 0), 2)
-                    cv2.line(frame, index_pt, middle_pt, (0, 255, 0), 2)
-                    
-                    # 绘制三指中心点
-                    center_x = int((thumb.x + index.x + middle.x) / 3.0 * w)
-                    center_y = int((thumb.y + index.y + middle.y) / 3.0 * h)
-                    cv2.circle(frame, (center_x, center_y), 8, (0, 0, 255), -1)
+                # 转换格式适配 process_hand_data
+                # MediaPipe 的 NormalizedLandmarkList 可以直接迭代，元素有 x,y,z
+                self.process_hand_data(hand_landmarks.landmark, frame)
         else:
-            # 无手时释放鼠标并重置状态
-            if self.mouse_down:
-                try:
-                    pyautogui.mouseUp()
-                    self.mouse_down = False
-                except Exception:
-                    pass
-            # 重置手势历史
-            self.gesture_history.clear()
-            self.confirmed_gesture = MODE_NONE
-            # 重置导航状态机
-            if self.nav_state != STATE_IDLE:
-                self.nav_state = STATE_IDLE
-                self.neutral_stay_count = 0
+            self._handle_no_hand()
 
         return frame
 
-    def filter_landmarks(self, landmarks, t):
+    def process_hand_data(self, landmarks_list, frame=None):
+        """
+        处理手部数据 (核心逻辑)
+        landmarks_list: 包含21个关键点的列表，每个点需有 .x, .y, .z 属性
+        frame: (可选) 用于绘制UI和状态文本
+        """
+        if frame is not None:
+            h, w, _ = frame.shape
+        else:
+            # 如果没有frame，使用默认分辨率计算（可能会影响像素级操作如平滑）
+            h, w = SCREEN_HEIGHT, SCREEN_WIDTH
+
+        current_time = time.time()
+        dt = current_time - self.last_time
+        self.last_time = current_time
+
+        # --- 🟢 模块一: 视觉感知 (识别手势) ---
+        # 对关键点进行OneEuroFilter滤波，消除抖动
+        filtered_landmarks = self.filter_landmarks(landmarks_list, current_time)
+        detected_gesture = self.recognize_gesture(filtered_landmarks, h, w)
+
+        # --- 🔵 模块二: 状态机 (带时间缓冲的模式切换) ---
+        # 状态机迟滞：连续N帧确认才更新状态
+        self.gesture_history.append(detected_gesture)
+        if len(self.gesture_history) == GESTURE_CONFIRM_FRAMES:
+            # 检查是否所有帧都是同一手势
+            if len(set(self.gesture_history)) == 1:
+                self.confirmed_gesture = detected_gesture
+            # 如果历史记录满了但手势不一致，清空重新开始
+            elif len(set(self.gesture_history)) > 1:
+                self.gesture_history.clear()
+        
+        # 注意: 如果正在捏合(写字中)，则锁定模式切换
+        is_pinching = self.check_pinch(filtered_landmarks, h, w)
+
+        if not is_pinching:
+            # 使用确认的手势进行模式切换
+            self.update_mode(self.confirmed_gesture, dt)
+
+        # --- 🟠 模块三: 执行层 (平滑 & 动作) ---
+        # 注意：执行层仍使用原始landmarks (或者滤波后的，这里保持逻辑一致性使用原始)
+        # 如果 landmarks_list 是对象列表，可以直接用
+        self.execute_action(landmarks_list, is_pinching, w, h)
+
+        # --- UI 反馈 ---
+        if frame is not None:
+            self._draw_ui(frame, detected_gesture, is_pinching, landmarks_list, w, h)
+
+    def _handle_no_hand(self):
+        """处理无手状态"""
+        if self.mouse_down:
+            try:
+                pyautogui.mouseUp()
+                self.mouse_down = False
+            except Exception:
+                pass
+        # 重置手势历史
+        self.gesture_history.clear()
+        self.confirmed_gesture = MODE_NONE
+        # 重置导航状态机
+        if self.nav_state != STATE_IDLE:
+            self.nav_state = STATE_IDLE
+            self.neutral_stay_count = 0
+
+    def _draw_ui(self, frame, detected_gesture, is_pinching, landmarks, w, h):
+        """绘制UI状态"""
+        mode_name = self.get_mode_name()
+        cv2.putText(
+            frame, f"Mode: {mode_name}", (10, 50),
+            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2
+        )
+        cv2.putText(
+            frame, f"Timer: {self.gesture_timer:.1f}s", (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        )
+        # 显示检测到的手势和确认的手势
+        detected_name = self._get_mode_name_from_gesture(detected_gesture)
+        confirmed_name = self._get_mode_name_from_gesture(self.confirmed_gesture)
+        cv2.putText(
+            frame, f"Detected: {detected_name}", (10, 170),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2
+        )
+        cv2.putText(
+            frame, f"Confirmed: {confirmed_name}", (10, 200),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
+        )
+        
+        # 显示实时捏合比率 (调试用)
+        pinch_color = (0, 255, 0) if is_pinching else (0, 0, 255)
+        cv2.putText(
+            frame, f"Pinch Ratio: {self.last_pinch_ratio:.3f}", (10, 230),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, pinch_color, 2
+        )
+        
+        # 显示三指捏合状态和距离信息
+        if is_pinching:
+            cv2.putText(
+                frame, "3-FINGER PINCH", (10, 130),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
+            )
+            # 在画面上绘制三指连接线，可视化捏合状态
+            thumb = landmarks[4]
+            index = landmarks[8]
+            middle = landmarks[12]
+            
+            thumb_pt = (int(thumb.x * w), int(thumb.y * h))
+            index_pt = (int(index.x * w), int(index.y * h))
+            middle_pt = (int(middle.x * w), int(middle.y * h))
+            
+            # 绘制连接线
+            cv2.line(frame, thumb_pt, index_pt, (0, 255, 0), 2)
+            cv2.line(frame, thumb_pt, middle_pt, (0, 255, 0), 2)
+            cv2.line(frame, index_pt, middle_pt, (0, 255, 0), 2)
+            
+            # 绘制三指中心点
+            center_x = int((thumb.x + index.x + middle.x) / 3.0 * w)
+            center_y = int((thumb.y + index.y + middle.y) / 3.0 * h)
+            cv2.circle(frame, (center_x, center_y), 8, (0, 0, 255), -1)
+
+    def filter_landmarks(self, landmarks_list, t):
         """
         对21个关键点进行OneEuroFilter滤波，消除抖动
         返回一个包含滤波后坐标的列表
         """
         filtered = []
-        for i, landmark in enumerate(landmarks.landmark):
+        for i, landmark in enumerate(landmarks_list):
             x = self.landmark_filters[(i, 'x')](landmark.x, t)
             y = self.landmark_filters[(i, 'y')](landmark.y, t)
             z = self.landmark_filters[(i, 'z')](landmark.z, t)
@@ -555,8 +612,8 @@ class HandController:
                         print("已通过COM接口切换到橡皮模式")
                         return
                 elif self.current_mode == MODE_NAV:
-                    if self.ppt_controller.set_pointer_type(1):  # 箭头
-                        print("已通过COM接口切换到箭头模式")
+                    if self.ppt_controller.set_pointer_type(3):  # 激光笔 (PointerType=3)
+                        print("已通过COM接口切换到激光笔模式")
                         return
         
         # 降级方案：使用模拟按键
@@ -566,48 +623,68 @@ class HandController:
             elif self.current_mode == MODE_ERASER:
                 pyautogui.hotkey('ctrl', 'e')
             elif self.current_mode == MODE_NAV:
-                pyautogui.hotkey('ctrl', 'a')
+                pyautogui.hotkey('ctrl', 'l')  # 激光笔快捷键
         except Exception as e:
             print(f"快捷键执行失败: {e}")
 
     def check_pinch(self, landmarks, h, w):
-        """检测拇指、食指、中指三指捏合"""
-        # 获取三指指尖坐标
+        """
+        简化版捏合检测：只检测拇指与食指的距离
+        引入迟滞逻辑 (Hysteresis) 防止状态抖动
+        """
+        # 获取指尖坐标
         # landmarks 可能是原始MediaPipe对象或滤波后的列表
-        if hasattr(landmarks, 'landmark'):
-            thumb = landmarks.landmark[4]   # 拇指尖
-            index = landmarks.landmark[8]    # 食指尖
-            middle = landmarks.landmark[12]  # 中指尖
+        try:
+            thumb = landmarks[4]   # 拇指尖
+            index = landmarks[8]    # 食指尖
+            # 辅助点用于计算手掌尺度
+            index_mcp = landmarks[5]   # 食指MCP
+            pinky_mcp = landmarks[17]  # 小指MCP
+        except (IndexError, AttributeError):
+            return False
+
+        # 计算手掌参考宽度 (食指MCP到小指MCP)
+        palm_width = math.hypot(index_mcp.x - pinky_mcp.x, index_mcp.y - pinky_mcp.y)
+        
+        if palm_width < 1e-6:
+            return False
+
+        # 计算拇指-食指距离 (归一化坐标)
+        dist_thumb_index = math.hypot(thumb.x - index.x, thumb.y - index.y)
+        
+        # 计算捏合比例
+        pinch_ratio = dist_thumb_index / palm_width
+        
+        # 调试信息：将捏合比率存入实例变量供UI显示
+        self.last_pinch_ratio = pinch_ratio
+        
+        # 迟滞阈值设置 (优化后的参数)
+        # 0.20: 需要捏得比较紧才触发 (防误触) -> 放宽到 0.28
+        # 0.40: 需要松开得比较大才断开 (防断连) -> 放宽到 0.50
+        PINCH_TRIGGER_THRESHOLD = 0.28
+        PINCH_RELEASE_THRESHOLD = 0.50
+
+        # 状态机逻辑
+        if self.mouse_down:
+            # 如果已经是按下状态，使用较宽松的释放阈值
+            if pinch_ratio > PINCH_RELEASE_THRESHOLD:
+                return False  # 松手
+            else:
+                return True   # 保持捏合
         else:
-            # 滤波后的列表格式
-            thumb = landmarks[4]
-            index = landmarks[8]
-            middle = landmarks[12]
-
-        # 转换为像素坐标
-        thumb_px = (thumb.x * w, thumb.y * h)
-        index_px = (index.x * w, index.y * h)
-        middle_px = (middle.x * w, middle.y * h)
-
-        # 计算三个指尖之间的距离
-        dist_thumb_index = math.hypot(thumb_px[0] - index_px[0], thumb_px[1] - index_px[1])
-        dist_thumb_middle = math.hypot(thumb_px[0] - middle_px[0], thumb_px[1] - middle_px[1])
-        dist_index_middle = math.hypot(index_px[0] - middle_px[0], index_px[1] - middle_px[1])
-
-        # 三指捏合：三个指尖之间的距离都要小于阈值
-        is_pinching = (dist_thumb_index < PINCH_THRESHOLD and
-                      dist_thumb_middle < PINCH_THRESHOLD and
-                      dist_index_middle < PINCH_THRESHOLD)
-
-        return is_pinching
+            # 如果是松开状态，使用严格的触发阈值
+            if pinch_ratio < PINCH_TRIGGER_THRESHOLD:
+                return True   # 触发捏合
+            else:
+                return False  # 保持松开
 
     def execute_action(self, landmarks, is_pinching, w, h):
         """根据当前模式执行具体操作"""
 
         # 1. 获取三指中心点坐标（用于更稳定的控制）
-        thumb = landmarks.landmark[4]
-        index = landmarks.landmark[8]
-        middle = landmarks.landmark[12]
+        thumb = landmarks[4]
+        index = landmarks[8]
+        middle = landmarks[12]
         
         # 计算三指中心点（如果捏合）或仅使用食指尖（如果未捏合）
         if is_pinching:
@@ -619,14 +696,21 @@ class HandController:
             center_x = index.x
             center_y = index.y
         
-        raw_x = np.interp(center_x, [0, 1], [0, SCREEN_WIDTH])
-        raw_y = np.interp(center_y, [0, 1], [0, SCREEN_HEIGHT])
+        # 使用高级 CoordinateMapper 进行映射和平滑 (与绘图模式一致)
+        # 传入归一化坐标 (0-1)，返回屏幕坐标 (0-W, 0-H)
+        curr_x, curr_y = self.cursor_mapper.map((center_x, center_y))
 
-        # 2. 指数平滑算法 (Exponential Smoothing)
-        curr_x = self.prev_x * SMOOTHING_FACTOR + raw_x * (1 - SMOOTHING_FACTOR)
-        curr_y = self.prev_y * SMOOTHING_FACTOR + raw_y * (1 - SMOOTHING_FACTOR)
+        # --- 子帧插值平滑逻辑 ---
+        # 即使使用了平滑器，直接跳到 curr_x, curr_y 也可能在 30fps 下显卡顿
+        # 我们在两帧之间生成中间点，模拟高频鼠标事件
+        INTERPOLATION_STEPS = 2  # 插入中间点的数量 (2-3比较合适)
+        
+        # 获取上一次的位置 (如果这是第一帧，就用当前位置)
+        start_x, start_y = self.prev_x, self.prev_y
+        if start_x == 0 and start_y == 0:
+            start_x, start_y = curr_x, curr_y
 
-        # 更新历史值
+        # 更新历史位置供下一帧使用
         self.prev_x, self.prev_y = curr_x, curr_y
 
         # 3. 分模式执行
@@ -640,8 +724,18 @@ class HandController:
                         self.mouse_down = True
                     except Exception:
                         pass
-                # 持续捏合，移动鼠标（保持按下状态）
+                
+                # 持续捏合，执行插值移动
                 try:
+                    # 生成插值点并移动
+                    for i in range(1, INTERPOLATION_STEPS + 1):
+                        alpha = i / (INTERPOLATION_STEPS + 1)
+                        interp_x = start_x + (curr_x - start_x) * alpha
+                        interp_y = start_y + (curr_y - start_y) * alpha
+                        pyautogui.moveTo(interp_x, interp_y, duration=0)
+                        # 不需要 sleep，pyautogui 的极小开销正好模拟了高回报率
+                    
+                    # 最后移动到目标点
                     pyautogui.moveTo(curr_x, curr_y, duration=0)
                 except Exception:
                     pass
@@ -653,7 +747,7 @@ class HandController:
                         self.mouse_down = False
                     except Exception:
                         pass
-                # 未捏合时仅移动光标
+                # 未捏合时仅移动光标 (不需要插值，节省性能)
                 try:
                     pyautogui.moveTo(curr_x, curr_y, duration=0)
                 except Exception:
@@ -749,7 +843,8 @@ class HandController:
 
     def close(self):
         """清理资源"""
-        self.hands.close()
+        if self.hands:
+            self.hands.close()
 
 
 # --- 🚀 主入口 ---
@@ -759,7 +854,8 @@ if __name__ == "__main__":
     cap.set(3, CAM_WIDTH)
     cap.set(4, CAM_HEIGHT)
 
-    controller = HandController()
+    # 独立运行时，使用内部 MediaPipe
+    controller = PPTGestureController(external_mp=False)
 
     # 创建可调整大小的窗口
     window_name = "PPT Gesture Controller"
@@ -770,11 +866,10 @@ if __name__ == "__main__":
     print("PPT手势控制系统启动")
     print("=" * 60)
     print("手势说明:")
-    print("  只有食指: 画笔模式 (PEN)")
-    print("  食指+中指: 橡皮模式 (ERASER)")
-    print("  食指+中指+无名指: 导航模式 (NAV)")
-    print("  拇指+食指+中指三指捏合: 开始绘制/擦除")
-    print("  导航模式下左右挥手: 翻页（不控制光标）")
+    print("  只有食指: 画笔模式 (PEN) -> 捏合书写 (带防抖)")
+    print("  食指+中指: 橡皮模式 (ERASER) -> 捏合擦除 (带防抖)")
+    print("  食指+中指+无名指: 导航/激光笔模式 (NAV/LASER)")
+    print("  导航模式下左右挥手: 翻页")
     print("=" * 60)
     print("按 'q' 退出")
 
@@ -802,4 +897,3 @@ if __name__ == "__main__":
         cap.release()
         cv2.destroyAllWindows()
         print("程序已退出")
-
