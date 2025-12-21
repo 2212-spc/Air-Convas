@@ -28,3 +28,7 @@ Thumbs.db
 # Project outputs
 captures/
 
+# IDE/AI configurations
+.trae/
+.claude/
+
