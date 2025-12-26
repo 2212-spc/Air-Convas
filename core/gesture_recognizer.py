@@ -4,13 +4,14 @@ from typing import Deque, Dict, List, Optional
 
 from core.hand_detector import (
     Hand,
+    WRIST,
     THUMB_TIP,
     INDEX_TIP,
     MIDDLE_TIP,
     RING_TIP,
     PINKY_TIP,
+    distance as point_distance,
 )
-from core.hand_detector import distance as point_distance
 
 
 class GestureRecognizer:
@@ -19,6 +20,7 @@ class GestureRecognizer:
         pinch_threshold: float,#三指捏合阈值
         pinch_release_threshold: float,#三指捏合释放阈值
         swipe_threshold: float,#挥手阈值
+        palm_spread_threshold: float = 0.08,#手掌张开阈值（橡皮擦）
         swipe_velocity_threshold: float = 0.015,#挥手速度阈值
         swipe_cooldown_frames: int = 20,#挥手冷却帧数
         history_len: int = 15,#挥手历史帧数
@@ -28,6 +30,7 @@ class GestureRecognizer:
         self.pinch_threshold = pinch_threshold
         self.pinch_release_threshold = pinch_release_threshold
         self.swipe_threshold = swipe_threshold
+        self.palm_spread_threshold = palm_spread_threshold
         self.swipe_velocity_threshold = swipe_velocity_threshold
         self.swipe_cooldown_frames = swipe_cooldown_frames
         self.history: Deque[tuple] = deque(maxlen=history_len)
@@ -60,6 +63,76 @@ class GestureRecognizer:
             self._finger_up(hand, RING_TIP),
             self._finger_up(hand, PINKY_TIP),
         ]
+    
+    def _is_palm_spread(self, hand: Hand) -> bool:
+        """检测手指是否张开（有间距），避免误触橡皮擦"""
+        # 计算相邻手指尖之间的距离
+        finger_tips = [
+            hand.landmarks_norm[THUMB_TIP],
+            hand.landmarks_norm[INDEX_TIP],
+            hand.landmarks_norm[MIDDLE_TIP],
+            hand.landmarks_norm[RING_TIP],
+            hand.landmarks_norm[PINKY_TIP],
+        ]
+        
+        # 计算相邻手指之间的距离
+        distances = []
+        for i in range(len(finger_tips) - 1):
+            dist = point_distance(finger_tips[i], finger_tips[i + 1])
+            distances.append(dist)
+        
+        # 所有相邻手指距离都要大于阈值（手指必须张开）
+        return all(d > self.palm_spread_threshold for d in distances)
+    
+    def _is_palm_open(self, hand: Hand) -> bool:
+        """检测手掌是否张开（橡皮擦）- 基于手指伸展度而不是竖起"""
+        # 手腕作为参考点
+        wrist = hand.landmarks_norm[0]  # WRIST
+        
+        # 所有指尖
+        finger_tips = [
+            hand.landmarks_norm[THUMB_TIP],
+            hand.landmarks_norm[INDEX_TIP],
+            hand.landmarks_norm[MIDDLE_TIP],
+            hand.landmarks_norm[RING_TIP],
+            hand.landmarks_norm[PINKY_TIP],
+        ]
+        
+        # 计算每个指尖到手腕的距离
+        distances = [point_distance(wrist, tip) for tip in finger_tips]
+        
+        # 所有手指都要距离手腕足够远（手指伸展开）
+        min_stretch = 0.25  # 最小伸展距离阈值
+        fingers_extended = all(d > min_stretch for d in distances)
+        
+        # 拇指和食指必须分开（不能是捏合姿势）
+        dist_thumb_index = point_distance(finger_tips[0], finger_tips[1])
+        thumb_index_far = dist_thumb_index > 0.08
+        
+        return fingers_extended and thumb_index_far
+    
+    def _is_palm_spread(self, hand: Hand) -> bool:
+        """检测手掌是否张开（手指之间有足够间距）"""
+        # 获取五个指尖的位置
+        thumb = hand.landmarks_norm[THUMB_TIP]
+        index = hand.landmarks_norm[INDEX_TIP]
+        middle = hand.landmarks_norm[MIDDLE_TIP]
+        ring = hand.landmarks_norm[RING_TIP]
+        pinky = hand.landmarks_norm[PINKY_TIP]
+        
+        # 计算相邻手指之间的距离
+        dist_thumb_index = point_distance(thumb, index)
+        dist_index_middle = point_distance(index, middle)
+        dist_middle_ring = point_distance(middle, ring)
+        dist_ring_pinky = point_distance(ring, pinky)
+        
+        # 所有相邻手指距离都要大于阈值
+        return all([
+            dist_thumb_index > self.palm_spread_threshold,
+            dist_index_middle > self.palm_spread_threshold,
+            dist_middle_ring > self.palm_spread_threshold,
+            dist_ring_pinky > self.palm_spread_threshold,
+        ])
 
     def _update_swipe(self, wrist_xy: tuple) -> Optional[str]:#更新挥手
         self.history.append(wrist_xy)#将手腕坐标添加到历史帧数中
@@ -140,7 +213,11 @@ class GestureRecognizer:
             self.pinch_active = False
             pinch_end = True
 
-        open_palm = sum(fingers) >= 4
+        # 橡皮擦：改用手指伸展度检测，而不是手指竖起
+        # 问题：完全平展的手掌手指是水平的，不满足"竖起"条件
+        # 解决：检测手指是否伸展开（指尖距离手掌中心远）
+        open_palm = self._is_palm_open(hand)
+        
         fist = not any(fingers)
         index_only = fingers[1] and not any(fingers[i] for i in (0, 2, 3, 4))
         index_middle = fingers[1] and fingers[2] and not any(fingers[i] for i in (0, 3, 4))
