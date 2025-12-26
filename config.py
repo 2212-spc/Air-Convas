@@ -13,9 +13,10 @@ ACTIVE_REGION_CURSOR = (0.0, 0.0, 1.0, 1.0)
 ACTIVE_REGION_DRAW = (0.0, 0.0, 1.0, 1.0)
 
 # Gesture thresholds
-# 三指捏合阈值（拇指+食指+中指）：更明确的手势，断开更容易
-PINCH_THRESHOLD = 0.16              # 三指贴合触发阈值（增大=更容易触发）
-PINCH_RELEASE_THRESHOLD = 0.18      # 任意一指分开即释放
+# 三指捏合阈值（拇指+食指+中指）：平衡模式，快速画线不断触
+PINCH_THRESHOLD = 0.12              # 三指触发阈值（稍微放宽，防止快速画线断触）
+PINCH_RELEASE_THRESHOLD = 0.09      # 手指分开停止（快速退出）
+PALM_SPREAD_THRESHOLD = 0.08        # 橡皮擦：手指间距阈值（手指要张开）
 SWIPE_THRESHOLD = 0.15              # 提高到15%，更符合自然挥手幅度
 SWIPE_COOLDOWN_FRAMES = 20
 SWIPE_VELOCITY_THRESHOLD = 0.008    # 降低速度要求，更容易触发
