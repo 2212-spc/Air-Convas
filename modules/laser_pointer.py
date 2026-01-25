@@ -1,4 +1,7 @@
-from typing import Tuple
+# -*- coding: utf-8 -*-
+"""激光笔模块 - 在食指指向模式下显示激光笔效果"""
+
+from typing import Tuple, List
 import cv2
 import numpy as np
 
@@ -20,6 +23,9 @@ class LaserPointer:
 
     def render(self, frame: np.ndarray, position: Tuple[int, int]) -> None:
         """在指定位置渲染激光笔效果"""
+        if position is None:
+            return
+            
         x, y = position
 
         # 边界检查（包括最大半径）
@@ -62,30 +68,11 @@ class LaserPointer:
             # 忽略渲染错误
             pass
 
-    def render_with_trail(
-        self,
-        frame: np.ndarray,
-        position: Tuple[int, int],
-        trail_positions: list
-    ) -> None:
-        """渲染激光笔和拖尾效果"""
-        try:
-            # 先绘制拖尾
-            if len(trail_positions) > 1:
-                for i in range(len(trail_positions) - 1):
-                    # 计算透明度（越旧越透明）
-                    alpha = (i + 1) / len(trail_positions) * 0.3
-
-                    pt1 = trail_positions[i]
-                    pt2 = trail_positions[i + 1]
-
-                    # 绘制淡淡的拖尾线
-                    overlay = frame.copy()
-                    cv2.line(overlay, pt1, pt2, self.color, 2, lineType=cv2.LINE_AA)
-                    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-
-            # 然后绘制主激光点
-            self.render(frame, position)
-        except Exception:
-            # 如果拖尾渲染失败，至少渲染主激光点
-            self.render(frame, position)
+    def render_with_trail(self, frame: np.ndarray, position: Tuple[int, int], trail_positions: List[Tuple[int, int]]) -> None:
+        """
+        [已废弃] 渲染激光笔和拖尾效果
+        
+        保留此方法以兼容旧代码，但实际上拖尾现在由 TemporaryInkManager 处理。
+        此方法仅渲染光标本身。
+        """
+        self.render(frame, position)

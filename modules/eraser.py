@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""橡皮擦模块"""
+
 from typing import Tuple
 
 from modules.canvas import Canvas
