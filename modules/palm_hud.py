@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""掌心HUD模块 - 在手掌静止时显示信息面板"""
+
 from typing import Tuple, Optional
 import cv2
 import numpy as np

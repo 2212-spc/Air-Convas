@@ -33,11 +33,12 @@ conda activate aircanvas
 pip install -r requirements.txt
 ```
 
-依赖包：
-- opencv-python：图像处理
-- mediapipe：手部检测
-- numpy：数值计算
-- pyautogui：鼠标/键盘控制
+依赖包（版本以 `requirements.txt` 为准）：
+- opencv-python==4.12.0.88：图像处理
+- mediapipe==0.10.14：手部检测
+- numpy==2.2.6：数值计算
+- pyautogui==0.9.54：鼠标/键盘控制 / PPT控制
+- pywin32==311：Windows 相关依赖
 
 ## 使用方法
 
