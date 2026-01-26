@@ -186,6 +186,36 @@ class SyncAsyncHandDetector:
         if self._sync_detector:
             self._sync_detector.close()
     
+    def _scale_hands(self, hands: List[Hand], target_w: int, target_h: int) -> List[Hand]:
+        """将检测结果缩放到目标分辨率"""
+        if not hands:
+            return []
+        
+        scaled_hands = []
+        for hand in hands:
+            # 使用归一化坐标重新计算像素坐标
+            new_landmarks = [
+                (int(lm[0] * target_w), int(lm[1] * target_h)) 
+                for lm in hand.landmarks_norm
+            ]
+            
+            # 重新计算包围盒
+            xs = [p[0] for p in new_landmarks]
+            ys = [p[1] for p in new_landmarks]
+            if xs and ys:
+                new_bbox = (min(xs), min(ys), max(xs), max(ys))
+            else:
+                new_bbox = (0, 0, 0, 0)
+            
+            scaled_hands.append(Hand(
+                landmarks=new_landmarks,
+                landmarks_norm=hand.landmarks_norm,
+                bbox=new_bbox,
+                handedness=hand.handedness,
+                confidence=hand.confidence
+            ))
+        return scaled_hands
+
     def detect(self, frame: np.ndarray) -> List[Hand]:
         """
         检测手部
@@ -193,9 +223,12 @@ class SyncAsyncHandDetector:
         异步模式：提交帧并返回最新可用结果
         同步模式：阻塞式检测
         """
+        h, w = frame.shape[:2]
+        hands = []
+
         if self._async_detector:
             self._async_detector.submit_frame(frame)
-            return self._async_detector.get_result()
+            hands = self._async_detector.get_result()
         else:
             # 同步模式：缩放后检测
             frame_small = cv2.resize(
@@ -203,7 +236,10 @@ class SyncAsyncHandDetector:
                 (self._infer_width, self._infer_height), 
                 interpolation=cv2.INTER_LINEAR
             )
-            return self._sync_detector.detect(frame_small)
+            hands = self._sync_detector.detect(frame_small)
+        
+        # 统一进行坐标缩放，确保返回的结果与输入 frame 的尺寸匹配
+        return self._scale_hands(hands, w, h)
     
     def draw_hand(self, frame: np.ndarray, hand: Hand, simple: bool = True) -> None:
         """
