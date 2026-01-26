@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""粒子系统模块 - 为手指移动添加拖尾粒子效果"""
+
 from typing import List, Tuple
 import numpy as np
 import cv2
