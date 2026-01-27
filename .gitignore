@@ -32,3 +32,12 @@ captures/
 .trae/
 .claude/
 
+# Environment setup scripts (local only)
+activate_conda.ps1
+
+# Temporary documentation files (use CHANGELOG.md instead)
+*说明.md
+*修复*.md
+*优化*.md
+*实现*.md
+

@@ -17,45 +17,45 @@ class GestureUI:
         self.height = height
         self.visible = True  # UI是否显示
 
-        # UI布局参数 - 避开边缘盲区，增大按钮
+        # UI布局参数 - 所有按键都在屏幕内，间距合适
         
-        # 1. 工具栏 (避开左边缘，移到稍靠内位置)
-        self.tool_panel_x = 180  # 从20改为180，避开边缘检测盲区
-        self.tool_panel_y_start = 100
-        self.tool_button_width = 110  # 加大
-        self.tool_button_height = 85  # 加高
-        self.tool_button_spacing = 105
+        # 1. 工具栏 (左侧)
+        self.tool_panel_x = 30  # 左侧留30px边距
+        self.tool_panel_y_start = 120  # 顶部留空间
+        self.tool_button_width = 120  # 合适的宽度
+        self.tool_button_height = 80  # 合适的高度
+        self.tool_button_spacing = 100  # 合适的间距
 
         # 1.1 快捷动作栏 (Clear / FX)
         self.action_panel_x = self.tool_panel_x
-        self.action_panel_y_start = self.tool_panel_y_start + self.tool_button_spacing * 3 + 30
-        self.action_button_width = 110
+        self.action_panel_y_start = self.tool_panel_y_start + self.tool_button_spacing * 3 + 20  # 工具下方
+        self.action_button_width = 120
         self.action_button_height = 70
         self.action_button_spacing = 85
         self.action_items = [("clear", "Clear"), ("particles", "FX")]
 
-        # 2. 颜色栏 (工具栏右侧)
-        self.color_panel_x = 320  # 相应右移
-        self.color_panel_y_start = 100
-        self.color_button_size = 70  # 加大
-        self.color_button_spacing = 90
+        # 2. 颜色栏 (中左区域)
+        self.color_panel_x = 200  # 工具栏右边
+        self.color_panel_y_start = 80  # 上移，确保所有颜色在屏幕内
+        self.color_button_size = 65  # 合适大小
+        self.color_button_spacing = 80  # 减小间距，确保8个颜色都可见
 
-        # 3. 粗细栏 (底部中央区域)
-        self.thickness_panel_y = height - 120
-        self.thickness_panel_x_start = width // 2 - 300  # 居中
-        self.thickness_button_width = 120
-        self.thickness_button_height = 80
-        self.thickness_button_spacing = 140
+        # 3. 粗细栏 (底部中央)
+        self.thickness_panel_y = height - 110  # 底部留110px
+        self.thickness_panel_x_start = width // 2 - 320  # 居中
+        self.thickness_button_width = 125  # 合适宽度
+        self.thickness_button_height = 75  # 合适高度
+        self.thickness_button_spacing = 140  # 合适间距
 
-        # 4. 笔刷类型栏 (右侧，但不在极右)
-        self.brush_panel_x = width - 280  # 从极右移入
-        self.brush_panel_y_start = 100
-        self.brush_button_width = 115
-        self.brush_button_height = 90
-        self.brush_button_spacing = 110
+        # 4. 笔刷类型栏 (右侧)
+        self.brush_panel_x = width - 160  # 右侧留160px
+        self.brush_panel_y_start = 120  # 和其他对齐
+        self.brush_button_width = 120  # 合适宽度
+        self.brush_button_height = 85  # 合适高度
+        self.brush_button_spacing = 100  # 合适间距
 
-        # 碰撞检测容差（进一步加大，补偿边缘抖动）
-        self.hit_tolerance = 40
+        # 碰撞检测容差（方便点击）
+        self.hit_tolerance = 45  # 合适的容差
 
         # 悬停和选择状态
         self.hover_item = None  # (type, index) 例如 ("color", 2)
@@ -69,10 +69,95 @@ class GestureUI:
     def toggle_visibility(self):
         """切换UI显示/隐藏"""
         self.visible = not self.visible
+    
+    def is_in_dead_zone(self, point: Tuple[int, int], brush_manager) -> bool:
+        """
+        检查点是否在按钮死区内（按钮区域+周围边距）
+        死区：防止在按钮区域误触开始画画
+        """
+        if not self.visible:
+            return False
+        
+        x, y = point
+        margin = 25  # 按钮周围的额外死区边距
+        
+        # 1. 检查工具按钮区域（包括周围空隙）
+        for i in range(len(brush_manager.TOOLS)):
+            btn_x = self.tool_panel_x
+            btn_y = self.tool_panel_y_start + i * self.tool_button_spacing
+            if self._point_in_rect(x, y, 
+                                   btn_x - margin, 
+                                   btn_y - margin,
+                                   self.tool_button_width + 2 * margin,
+                                   self.tool_button_height + 2 * margin):
+                return True
+        
+        # 2. 检查动作按钮区域
+        for i in range(len(self.action_items)):
+            btn_x = self.action_panel_x
+            btn_y = self.action_panel_y_start + i * self.action_button_spacing
+            if self._point_in_rect(x, y,
+                                   btn_x - margin,
+                                   btn_y - margin,
+                                   self.action_button_width + 2 * margin,
+                                   self.action_button_height + 2 * margin):
+                return True
+        
+        # 3. 检查颜色按钮区域
+        if brush_manager.tool == "pen":
+            for i in range(len(brush_manager.COLOR_NAMES)):
+                btn_x = self.color_panel_x
+                btn_y = self.color_panel_y_start + i * self.color_button_spacing
+                if self._point_in_circle(x, y, btn_x, btn_y, 
+                                        self.color_button_size // 2 + margin):
+                    return True
+        
+        # 4. 检查粗细按钮区域
+        for i in range(len(brush_manager.THICKNESSES)):
+            btn_x = self.thickness_panel_x_start + i * self.thickness_button_spacing
+            btn_y = self.thickness_panel_y
+            if self._point_in_rect(x, y,
+                                   btn_x - margin,
+                                   btn_y - margin,
+                                   self.thickness_button_width + 2 * margin,
+                                   self.thickness_button_height + 2 * margin):
+                return True
+        
+        # 5. 检查笔刷按钮区域
+        if brush_manager.tool == "pen":
+            for i in range(len(brush_manager.BRUSH_TYPES)):
+                btn_x = self.brush_panel_x
+                btn_y = self.brush_panel_y_start + i * self.brush_button_spacing
+                if self._point_in_rect(x, y,
+                                       btn_x - margin,
+                                       btn_y - margin,
+                                       self.brush_button_width + 2 * margin,
+                                       self.brush_button_height + 2 * margin):
+                    return True
+        
+        return False
 
+    def handle_mouse_click(self, point: Tuple[int, int], brush_manager) -> bool:
+        """
+        处理鼠标点击
+        返回: True表示点击被处理
+        """
+        if not self.visible:
+            return False
+        
+        # 更新悬停状态以找到点击的项
+        self.update_hover(point, brush_manager)
+        
+        if self.hover_item:
+            # 选择点击的项
+            self.select_hover_item(brush_manager)
+            return True
+        
+        return False
+    
     def update_hover(self, point: Tuple[int, int], brush_manager) -> Optional[Tuple[str, int]]:
         """
-        更新悬停状态
+        更新悬停状态（带智能锁定）
         返回: (类型, 索引) 如果悬停在某个按钮上
         """
         if not self.visible:
@@ -81,58 +166,114 @@ class GestureUI:
         x, y = point
         new_hover = None
         tol = self.hit_tolerance  # 容差
+        
+        # 智能锁定：记录最近的按钮及距离
+        nearest_button = None
+        nearest_distance = float('inf')
+        smart_lock_threshold = 60  # 智能锁定距离阈值（像素）
 
         # 检查工具按钮 (Tool)
         for i in range(len(brush_manager.TOOLS)):
-            btn_x = self.tool_panel_x
-            btn_y = self.tool_panel_y_start + i * self.tool_button_spacing
-            if self._point_in_rect(x, y, btn_x - tol, btn_y - tol,
+            btn_x = self.tool_panel_x + self.tool_button_width // 2  # 按钮中心X
+            btn_y = self.tool_panel_y_start + i * self.tool_button_spacing + self.tool_button_height // 2  # 按钮中心Y
+            
+            # 计算距离
+            distance = ((x - btn_x) ** 2 + (y - btn_y) ** 2) ** 0.5
+            
+            # 直接点击检测
+            if self._point_in_rect(x, y, 
+                                   self.tool_panel_x - tol, 
+                                   self.tool_panel_y_start + i * self.tool_button_spacing - tol,
                                    self.tool_button_width + 2 * tol,
                                    self.tool_button_height + 2 * tol):
                 new_hover = ("tool", i)
                 break
+            
+            # 智能锁定：记录最近的按钮
+            if distance < nearest_distance and distance < smart_lock_threshold:
+                nearest_distance = distance
+                nearest_button = ("tool", i)
 
         # 检查动作按钮 (Action)
         if new_hover is None:
             for i in range(len(self.action_items)):
-                btn_x = self.action_panel_x
-                btn_y = self.action_panel_y_start + i * self.action_button_spacing
-                if self._point_in_rect(x, y, btn_x - tol, btn_y - tol,
+                btn_x = self.action_panel_x + self.action_button_width // 2
+                btn_y = self.action_panel_y_start + i * self.action_button_spacing + self.action_button_height // 2
+                
+                distance = ((x - btn_x) ** 2 + (y - btn_y) ** 2) ** 0.5
+                
+                if self._point_in_rect(x, y, 
+                                       self.action_panel_x - tol,
+                                       self.action_panel_y_start + i * self.action_button_spacing - tol,
                                        self.action_button_width + 2 * tol,
                                        self.action_button_height + 2 * tol):
                     new_hover = ("action", i)
                     break
+                
+                if distance < nearest_distance and distance < smart_lock_threshold:
+                    nearest_distance = distance
+                    nearest_button = ("action", i)
 
         # 检查颜色按钮 (Color) - 只有非橡皮/激光模式下才有效
         if new_hover is None and brush_manager.tool == "pen":
             for i in range(len(brush_manager.COLOR_NAMES)):
                 btn_x = self.color_panel_x
                 btn_y = self.color_panel_y_start + i * self.color_button_spacing
+                
+                distance = ((x - btn_x) ** 2 + (y - btn_y) ** 2) ** 0.5
+                
                 if self._point_in_circle(x, y, btn_x, btn_y, self.color_button_size // 2 + tol):
                     new_hover = ("color", i)
                     break
+                
+                if distance < nearest_distance and distance < smart_lock_threshold:
+                    nearest_distance = distance
+                    nearest_button = ("color", i)
 
         # 检查粗细按钮 (Thickness)
         if new_hover is None:
             for i in range(len(brush_manager.THICKNESSES)):
-                btn_x = self.thickness_panel_x_start + i * self.thickness_button_spacing
-                btn_y = self.thickness_panel_y
-                if self._point_in_rect(x, y, btn_x - tol, btn_y - tol,
+                btn_x = self.thickness_panel_x_start + i * self.thickness_button_spacing + self.thickness_button_width // 2
+                btn_y = self.thickness_panel_y + self.thickness_button_height // 2
+                
+                distance = ((x - btn_x) ** 2 + (y - btn_y) ** 2) ** 0.5
+                
+                if self._point_in_rect(x, y, 
+                                       self.thickness_panel_x_start + i * self.thickness_button_spacing - tol,
+                                       self.thickness_panel_y - tol,
                                        self.thickness_button_width + 2 * tol,
                                        self.thickness_button_height + 2 * tol):
                     new_hover = ("thickness", i)
                     break
+                
+                if distance < nearest_distance and distance < smart_lock_threshold:
+                    nearest_distance = distance
+                    nearest_button = ("thickness", i)
 
         # 检查笔刷类型按钮 (BrushType) - 只有画笔模式有效
         if new_hover is None and brush_manager.tool == "pen":
             for i in range(len(brush_manager.BRUSH_TYPES)):
-                btn_x = self.brush_panel_x
-                btn_y = self.brush_panel_y_start + i * self.brush_button_spacing
-                if self._point_in_rect(x, y, btn_x - tol, btn_y - tol,
+                btn_x = self.brush_panel_x + self.brush_button_width // 2
+                btn_y = self.brush_panel_y_start + i * self.brush_button_spacing + self.brush_button_height // 2
+                
+                distance = ((x - btn_x) ** 2 + (y - btn_y) ** 2) ** 0.5
+                
+                if self._point_in_rect(x, y, 
+                                       self.brush_panel_x - tol,
+                                       self.brush_panel_y_start + i * self.brush_button_spacing - tol,
                                        self.brush_button_width + 2 * tol,
                                        self.brush_button_height + 2 * tol):
                     new_hover = ("brush", i)
                     break
+                
+                if distance < nearest_distance and distance < smart_lock_threshold:
+                    nearest_distance = distance
+                    nearest_button = ("brush", i)
+        
+        # 智能锁定：如果没有直接点击到按钮，但接近某个按钮，则锁定到该按钮
+        if new_hover is None and nearest_button is not None:
+            new_hover = nearest_button
+            print(f"智能锁定到按钮: {nearest_button[0]} #{nearest_button[1]} (距离: {nearest_distance:.1f}px)")
 
         # 悬停锁定机制
         if new_hover is not None:
