@@ -46,6 +46,7 @@ from modules.gesture_ui import GestureUI
 from modules.ppt_gesture_controller import PPTGestureController
 from modules.temporary_ink import TemporaryInkManager
 from modules.visual_effects import EffectManager
+from modules.tutorial_manager import TutorialManager
 
 
 @dataclass
@@ -99,6 +100,20 @@ def main() -> None:
     cv2.namedWindow(config.WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
     cv2.resizeWindow(config.WINDOW_NAME, config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
     FULLSCREEN = False
+    
+    # 鼠标点击处理的全局变量
+    mouse_clicked = False
+    mouse_click_pos = None
+    
+    def mouse_callback(event, x, y, flags, param):
+        """鼠标回调函数"""
+        nonlocal mouse_clicked, mouse_click_pos
+        if event == cv2.EVENT_LBUTTONDOWN:
+            mouse_clicked = True
+            mouse_click_pos = (x, y)
+    
+    # 设置鼠标回调
+    cv2.setMouseCallback(config.WINDOW_NAME, mouse_callback)
 
     # 推理分辨率
     INFER_W = getattr(config, 'INFER_WIDTH', 640)
@@ -213,6 +228,9 @@ def main() -> None:
     # 手势UI界面
     gesture_ui = GestureUI(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
 
+    # 教程管理器
+    tutorial_manager = TutorialManager(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
+
     fps = 0
     last_time = time.time()
     frame_count = 0
@@ -221,6 +239,9 @@ def main() -> None:
     # 模式控制
     draw_lock = 0
     DRAW_LOCK_FRAMES = getattr(config, 'DRAW_LOCK_FRAMES', 5)
+    
+    # 画画状态追踪（用于死区检测）
+    is_drawing = False  # 是否正在画画
 
     # AR效果控制开关
     ENABLE_PARTICLES = False  # 默认关闭粒子效果以减少延迟
@@ -246,6 +267,47 @@ def main() -> None:
             print("警告：无法读取摄像头帧")
             break
 
+        frame = cv2.flip(frame, 1)
+
+        # 如果教程激活，只渲染教程界面和基本视频
+        if tutorial_manager.is_active:
+            # 获取手部位置用于点击检测
+            hands = detector.detect(frame)
+            cursor_pos = None
+            if hands:
+                hand = hands[0]
+                index_norm = hand.landmarks_norm[INDEX_TIP]
+                cursor_pos = draw_mapper.map(index_norm)
+                detector.draw_hand(frame, hand)
+            
+            # 渲染教程
+            tutorial_manager.render(frame, cursor_pos)
+            
+            # 检测手势点击（捏合手势作为点击）
+            if hands:
+                g = gesture.classify(hand)
+                if g["pinch_start"]:
+                    if cursor_pos:
+                        tutorial_manager.handle_click(cursor_pos)
+            
+            # 检测鼠标点击
+            if mouse_clicked:
+                if mouse_click_pos:
+                    tutorial_manager.handle_click(mouse_click_pos)
+                mouse_clicked = False
+                mouse_click_pos = None
+            
+            cv2.imshow(config.WINDOW_NAME, frame)
+            key = cv2.waitKey(1) & 0xFF
+            
+            # 教程中的键盘处理
+            if key == ord("q"):
+                break
+            elif key != 255:  # 任意其他按键
+                tutorial_manager.handle_key(key)
+            
+            continue  # 跳过正常游戏逻辑
+
         if draw_lock > 0:
             draw_lock -= 1
 
@@ -254,8 +316,6 @@ def main() -> None:
             undo_redo_hint_frames -= 1
         else:
             undo_redo_hint = ""
-
-        frame = cv2.flip(frame, 1)
         
         hands = detector.detect(frame)
         
@@ -434,36 +494,105 @@ def main() -> None:
 
                         draw_lock = DRAW_LOCK_FRAMES
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 255))
+                
+                # 鼠标点击UI选择
+                if mouse_clicked and mouse_click_pos:
+                    # 如果UI可见，处理UI点击
+                    if gesture_ui.visible:
+                        if gesture_ui.handle_mouse_click(mouse_click_pos, brush_manager):
+                            # 处理UI动作
+                            if gesture_ui.hover_item:
+                                item_type, _ = gesture_ui.hover_item
+                                if item_type == "tool":
+                                    print(f"工具切换到: {brush_manager.tool}")
+                                    effect_manager.add_ripple(mouse_click_pos, color=(255, 255, 0))
+                                elif item_type == "color":
+                                    print(f"颜色切换到: {brush_manager.color_name}")
+                                    effect_manager.add_ripple(mouse_click_pos, color=brush_manager.color)
+                                elif item_type == "thickness":
+                                    print(f"粗细切换到: {brush_manager.thickness}")
+                                    effect_manager.add_ripple(mouse_click_pos, color=(0, 255, 255))
+                                elif item_type == "brush":
+                                    print(f"笔刷切换到: {brush_manager.brush_type}")
+                                    effect_manager.add_ripple(mouse_click_pos, color=(255, 0, 255))
+                                elif item_type == "action":
+                                    # 执行动作
+                                    action_key = gesture_ui.action_items[gesture_ui.hover_item[1]][0]
+                                    if action_key == "clear":
+                                        canvas.clear()
+                                        temp_ink_manager.clear()
+                                        particle_system.clear()
+                                        undo_redo_hint = "Clear"
+                                        undo_redo_hint_frames = 30
+                                        effect_manager.add_ripple(mouse_click_pos, color=(255, 0, 0))
+                                        print("画布已清空")
+                                    elif action_key == "particles":
+                                        ENABLE_PARTICLES = not ENABLE_PARTICLES
+                                        if not ENABLE_PARTICLES:
+                                            particle_system.clear()
+                                        effect_manager.add_ripple(mouse_click_pos, color=(0, 255, 0))
+                                        print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
+                            
+                            draw_lock = DRAW_LOCK_FRAMES
+                    
+                    # 无论是否点击到按钮，都清除鼠标点击标志
+                    mouse_clicked = False
+                    mouse_click_pos = None
 
                 # ========== 工具逻辑 (基于当前选中的Tool执行) ==========
                 
                 # 1. 笔画开始/结束管理
                 if g["pinch_start"]:
-                    if brush_manager.tool == "pen":
-                        pen.start_stroke()
-                    elif brush_manager.tool == "laser":
-                        if temp_ink_manager.current_stroke is None:
-                            temp_ink_manager.start_stroke(color=(0, 0, 255), thickness=4)
+                    # 死区检测：在死区内完全不允许开始画画
+                    in_dead_zone = gesture_ui.is_in_dead_zone(draw_pt, brush_manager)
+                    
+                    if in_dead_zone:
+                        # 在死区内，不允许开始画画
+                        print("在按钮区域，无法开始画画")
+                    else:
+                        # 不在死区，允许开始画画
+                        if brush_manager.tool == "pen":
+                            pen.start_stroke()
+                            is_drawing = True  # 标记进入画画状态
+                        elif brush_manager.tool == "eraser":
+                            is_drawing = True  # 橡皮也需要标记
+                        elif brush_manager.tool == "laser":
+                            if temp_ink_manager.current_stroke is None:
+                                temp_ink_manager.start_stroke(color=(0, 0, 255), thickness=4)
+                            is_drawing = True  # 标记进入画画状态
                     draw_lock = 0
 
-                # 2. 执行工具动作 (捏合时)
+                # 2. 执行工具动作 (捏合时) - 死区检查
                 if g["pinching"] and draw_lock == 0:
-                    if brush_manager.tool == "pen":
-                        # 画笔模式
-                        smoothed_pt = pen.draw(draw_pt)
-                        if ENABLE_PARTICLES:
-                            particle_system.emit(draw_pt, brush_manager.color)
+                    # 每一帧都检查是否在死区，在死区则不执行画画操作
+                    in_dead_zone = gesture_ui.is_in_dead_zone(draw_pt, brush_manager)
                     
-                    elif brush_manager.tool == "eraser":
-                        # 橡皮模式 (捏合时擦除)
-                        eraser.erase(draw_pt)
+                    if in_dead_zone:
+                        # 在死区内，完全禁止画画
+                        if is_drawing:
+                            # 如果之前在画，现在进入死区，暂停画画但不结束笔画
+                            print("进入按钮死区，暂停画画")
+                    else:
+                        # 不在死区，正常画画
+                        if brush_manager.tool == "pen":
+                            # 画笔模式
+                            smoothed_pt = pen.draw(draw_pt)
+                            if ENABLE_PARTICLES:
+                                particle_system.emit(draw_pt, brush_manager.color)
                         
-                    elif brush_manager.tool == "laser":
-                        # 激光笔模式 (捏合时画轨迹)
-                        temp_ink_manager.add_point(draw_pt)
+                        elif brush_manager.tool == "eraser":
+                            # 橡皮模式 (捏合时擦除)
+                            eraser.erase(draw_pt)
+                            
+                        elif brush_manager.tool == "laser":
+                            # 激光笔模式 (捏合时画轨迹)
+                            temp_ink_manager.add_point(draw_pt)
                 
                 # 3. 结束动作 (捏合结束)
                 if g["pinch_end"]:
+                    # 所有工具都清除画画状态
+                    is_drawing = False  # 清除画画状态
+                    
                     if brush_manager.tool == "pen":
                         finished_points = pen.end_stroke()
                         draw_lock = DRAW_LOCK_FRAMES
@@ -483,6 +612,9 @@ def main() -> None:
                     
                     elif brush_manager.tool == "laser":
                         temp_ink_manager.end_stroke()
+                    
+                    elif brush_manager.tool == "eraser":
+                        pass  # 橡皮不需要特殊结束处理
 
                 detector.draw_hand(frame, hand)
             else:
@@ -491,6 +623,7 @@ def main() -> None:
                 temp_ink_manager.end_stroke()
                 palm_hud.reset()
                 gesture.reset_pinch_history()
+                is_drawing = False  # 清除画画状态
 
             # ========== 特效更新与渲染 ==========
             
@@ -554,6 +687,17 @@ def main() -> None:
                 brush_manager.get_status_text(),
                 canvas.get_history_info(),
             ]
+            
+            # 工具大标题提示（醒目显示当前工具）
+            tool_display = {
+                "pen": "TOOL: PEN (Draw)",
+                "eraser": "TOOL: ERASER", 
+                "laser": "TOOL: LASER (Fades in 1.5s)"
+            }
+            tool_text = tool_display.get(brush_manager.tool, brush_manager.tool.upper())
+            tool_color = (0, 255, 255) if brush_manager.tool == "pen" else (0, 165, 255) if brush_manager.tool == "laser" else (0, 0, 255)
+            cv2.putText(frame, tool_text, (config.CAMERA_WIDTH // 2 - 150, 40), 
+                       cv2.FONT_HERSHEY_DUPLEX, 0.8, tool_color, 2, lineType=cv2.LINE_AA)
 
             # 效果状态
             effect_status = []
@@ -605,6 +749,23 @@ def main() -> None:
 
             # 渲染手势UI界面
             gesture_ui.render(frame, brush_manager, action_state={"particles": ENABLE_PARTICLES})
+
+            # 渲染Help按钮（如果教程已完成）
+            help_cursor_pos = None
+            if ui_draw_pt:
+                help_cursor_pos = ui_draw_pt
+            tutorial_manager.render(frame, help_cursor_pos)
+            
+            # 检测Help按钮点击（捏合手势）
+            if g and g["pinch_start"] and help_cursor_pos:
+                tutorial_manager.handle_click(help_cursor_pos)
+            
+            # 检测Help按钮鼠标点击
+            if mouse_clicked:
+                if mouse_click_pos:
+                    tutorial_manager.handle_click(mouse_click_pos)
+                mouse_clicked = False
+                mouse_click_pos = None
 
         cv2.imshow(config.WINDOW_NAME, frame)
         key = cv2.waitKey(1) & 0xFF

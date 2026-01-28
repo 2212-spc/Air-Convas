@@ -103,6 +103,9 @@ class VirtualPen:
         self._last_curve_end = None
         self._current_thickness = 1.0
         self._last_speed = 0.0
+        # 重置虚线相位（如果是虚线笔刷）
+        if self.brush_manager.brush_type == "dashed":
+            self.brush_manager.reset_dash_phase()
 
     def _distance(self, p1: Tuple[int, int], p2: Tuple[int, int]) -> float:
         """计算两点距离"""
@@ -145,7 +148,7 @@ class VirtualPen:
         # 使用笔刷管理器绘制（支持虚线/发光/马克笔/彩虹）
         self.brush_manager.draw_line(canvas_img, pt1, pt2, thickness)
         
-        # 绘制圆形端点，使线条更圆润（仅对实线/彩虹）
+        # 绘制圆形端点，使线条更圆润（虚线不需要端点圆圈）
         if self.brush_manager.brush_type in ("solid", "rainbow"):
             color = self.brush_manager.color
             radius = max(1, thickness // 2)
@@ -203,11 +206,18 @@ class VirtualPen:
         # 绘制策略
         if self.enable_bezier:
             if len(self._window) == 1:
-                # 第1个点：画起始圆点
+                # 第1个点：画起始圆点（所有笔刷类型都需要起始点）
                 canvas_img = self.canvas.get_canvas()
-                radius = max(1, thickness // 2)
-                cv2.circle(canvas_img, point, radius, 
-                          self.brush_manager.color, -1, lineType=cv2.LINE_AA)
+                # 虚线使用加粗的起始点（与虚线粗细一致）
+                if self.brush_manager.brush_type == "dashed":
+                    dashed_thickness = thickness + max(2, int(thickness * 0.3))
+                    radius = max(1, dashed_thickness // 2)
+                    cv2.circle(canvas_img, point, radius, 
+                              self.brush_manager.color, -1, lineType=cv2.LINE_AA)
+                else:
+                    radius = max(1, thickness // 2)
+                    cv2.circle(canvas_img, point, radius, 
+                              self.brush_manager.color, -1, lineType=cv2.LINE_AA)
             elif len(self._window) == 2:
                 self._draw_line_segment(self._window[-2], self._window[-1], thickness)
                 self._last_curve_end = point

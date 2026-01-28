@@ -39,6 +39,11 @@ class BrushManager:
         self.current_thickness_index = 2  # 默认 6px (index 2)
         self.current_brush_type_index = 0  # solid
         self.current_tool_index = 0  # pen (默认画笔)
+        
+        # 虚线相位追踪（用于连续虚线效果）
+        self.dash_phase = 0.0  # 当前虚线相位
+        self.dash_length = 35  # 实线段长度（0.7cm，70%）
+        self.gap_length = 15   # 空隙长度（0.3cm，30%）
 
     @property
     def color(self) -> Tuple[int, int, int]:
@@ -125,28 +130,68 @@ class BrushManager:
         elif self.brush_type == "rainbow":
             cv2.line(canvas, pt1, pt2, current_color, use_thickness, lineType=cv2.LINE_AA)
 
+    def reset_dash_phase(self):
+        """重置虚线相位（开始新笔画时调用）"""
+        self.dash_phase = 0.0
+    
     def _draw_dashed_line(self, canvas: np.ndarray, pt1: Tuple[int, int], pt2: Tuple[int, int], color, thickness: int):
-        """绘制虚线"""
+        """
+        绘制虚线 - 沿着路径连续绘制，使用相位累积
+        像普通线段一样，但从中间一些地方断开
+        以1组为单位，其中80%是实线，20%是空白
+        """
         x1, y1 = pt1
         x2, y2 = pt2
         dx = x2 - x1
         dy = y2 - y1
         distance = np.sqrt(dx**2 + dy**2)
 
-        if distance < 1:
+        if distance < 0.5:
             return
 
-        dash_length = 10
-        gap_length = 5
-        total_length = dash_length + gap_length
-        num_dashes = int(distance / total_length)
+        # 虚线使用更粗的线条
+        dashed_thickness = thickness + max(2, int(thickness * 0.3))
+        
+        # 虚线周期参数
+        period = self.dash_length + self.gap_length  # 完整周期长度
+        
+        # 调试信息（只在第一次绘制时打印）
+        if not hasattr(self, '_dashed_debug_printed'):
+            print(f"[虚线] 实线={self.dash_length}px(0.7cm, 70%), 空隙={self.gap_length}px(0.3cm, 30%), 粗细={thickness}→{dashed_thickness}")
+            self._dashed_debug_printed = True
 
-        for i in range(num_dashes):
-            t1 = i * total_length / distance
-            t2 = (i * total_length + dash_length) / distance
-            p1 = (int(x1 + t1 * dx), int(y1 + t1 * dy))
-            p2 = (int(x1 + t2 * dx), int(y1 + t2 * dy))
-            cv2.line(canvas, p1, p2, color, thickness, lineType=cv2.LINE_AA)
+        # 沿着 pt1 -> pt2 绘制虚线，考虑当前相位
+        current_distance = 0.0
+        
+        while current_distance < distance:
+            # 当前相位在周期中的位置
+            phase_in_period = self.dash_phase % period
+            
+            # 判断当前位置是实线还是空隙
+            if phase_in_period < self.dash_length:
+                # 在实线段内
+                remaining_dash = self.dash_length - phase_in_period
+                segment_length = min(remaining_dash, distance - current_distance)
+                
+                # 计算线段的起始和结束点
+                t1 = current_distance / distance
+                t2 = (current_distance + segment_length) / distance
+                p1 = (int(x1 + t1 * dx), int(y1 + t1 * dy))
+                p2 = (int(x1 + t2 * dx), int(y1 + t2 * dy))
+                
+                # 绘制实线段
+                if segment_length > 0.5:
+                    cv2.line(canvas, p1, p2, color, dashed_thickness, lineType=cv2.LINE_AA)
+                
+                current_distance += segment_length
+                self.dash_phase += segment_length
+            else:
+                # 在空隙段内，跳过
+                remaining_gap = period - phase_in_period
+                segment_length = min(remaining_gap, distance - current_distance)
+                
+                current_distance += segment_length
+                self.dash_phase += segment_length
 
     def _draw_glow_line(self, canvas: np.ndarray, pt1: Tuple[int, int], pt2: Tuple[int, int], color, thickness: int):
         """绘制发光线条 - 改进光晕效果"""
