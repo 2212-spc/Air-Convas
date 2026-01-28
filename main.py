@@ -49,6 +49,7 @@ from modules.temporary_ink import TemporaryInkManager
 from modules.visual_effects import EffectManager
 from modules.interactive_effects import InteractiveEffectsManager
 from modules.tutorial_manager import TutorialManager
+from modules.particle_mode_manager import ParticleModeManager
 
 
 @dataclass
@@ -288,6 +289,9 @@ def main() -> None:
 
     # 教程管理器
     tutorial_manager = TutorialManager(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
+    
+    # 粒子特效管理器
+    particle_mode_manager = ParticleModeManager(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
 
     fps = 0
     last_time = time.time()
@@ -371,6 +375,74 @@ def main() -> None:
                 tutorial_manager.handle_key(key)
             
             continue  # 跳过正常游戏逻辑
+        
+        # ========== 粒子特效模式 ==========
+        if particle_mode_manager.is_active:
+            # 检测手部
+            hands = detector.detect(frame)
+            
+            # 如果在UI选择阶段
+            if particle_mode_manager.is_ui_selecting:
+                # 保存原始摄像头画面
+                display_frame = frame.copy()
+                
+                # 渲染UI
+                particle_mode_manager.render(display_frame, hands)
+                
+                # 处理手势点击 - 只使用食指尖作为控制点
+                cursor_pos = None
+                if hands:
+                    hand = hands[0]
+                    g = gesture.classify(hand)
+                    
+                    # 获取食指尖位置（唯一控制点）
+                    index_norm = hand.landmarks_norm[INDEX_TIP]
+                    cursor_pos = draw_mapper.map(index_norm)
+                    
+                    # 在UI区域只显示一个控制点（绿色圆点）
+                    cv2.circle(display_frame, cursor_pos, 8, (0, 255, 0), -1, lineType=cv2.LINE_AA)
+                    cv2.circle(display_frame, cursor_pos, 10, (0, 255, 0), 2, lineType=cv2.LINE_AA)
+                    
+                    # 更新UI悬停状态（使用食指尖位置）
+                    particle_mode_manager.ui.handle_mouse(cv2.EVENT_MOUSEMOVE, cursor_pos[0], cursor_pos[1], 0, None)
+                    
+                    # 捏合作为点击
+                    if g["pinch_start"] and cursor_pos:
+                        particle_mode_manager.handle_click(cursor_pos)
+                
+                # 处理鼠标点击
+                if mouse_clicked and mouse_click_pos:
+                    particle_mode_manager.handle_click(mouse_click_pos)
+                    mouse_clicked = False
+                    mouse_click_pos = None
+                
+                cv2.imshow(config.WINDOW_NAME, display_frame)
+            else:
+                # 粒子特效显示阶段
+                # 创建纯黑背景
+                black_frame = np.zeros_like(frame)
+                
+                # 更新粒子系统
+                particle_mode_manager.update(hands)
+                
+                # 渲染粒子特效到黑色背景
+                particle_mode_manager.render(black_frame, hands)
+                
+                # 绘制摄像头画面到左下角
+                camera_with_hand = frame.copy()
+                if hands:
+                    detector.draw_hand(camera_with_hand, hands[0])
+                particle_mode_manager.render_camera_feed(black_frame, camera_with_hand)
+                
+                cv2.imshow(config.WINDOW_NAME, black_frame)
+            
+            # 键盘处理
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+            particle_mode_manager.handle_keyboard(key)
+            
+            continue  # 跳过正常绘图逻辑
 
         if draw_lock > 0:
             draw_lock -= 1
@@ -574,7 +646,6 @@ def main() -> None:
 
                         draw_lock = DRAW_LOCK_FRAMES
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 255))
-                
 
                 # ========== 工具逻辑 (基于当前选中的Tool执行) ==========
                 
@@ -888,10 +959,12 @@ def main() -> None:
             ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
             print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'} - {interactive_effects.get_effect_label()}")
         if key == ord('5'):
-            # 切换特效类型
-            if ENABLE_INTERACTIVE_EFFECTS:
-                effect_name = interactive_effects.next_effect()
-                print(f"Effect switched to: {interactive_effects.get_effect_label()}")
+            # 切换粒子特效模式
+            if particle_mode_manager.is_active:
+                particle_mode_manager.deactivate()
+            else:
+                particle_mode_manager.activate()
+            print(f"Particle Mode: {'ON' if particle_mode_manager.is_active else 'OFF'}")
         if key == ord('l'):
             ENABLE_LINE_ASSIST = not ENABLE_LINE_ASSIST
             shape_recognizer.set_line_assist(ENABLE_LINE_ASSIST)
