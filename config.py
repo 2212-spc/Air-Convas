@@ -64,13 +64,13 @@ UI_RADIUS = 15
 
 # ==================== 手势阈值 ====================
 # 两指捏合阈值（拇指+食指）
-PINCH_THRESHOLD = 0.08              # 基础捏合阈值
-PINCH_RELEASE_THRESHOLD = 0.12      # 释放阈值（迟滞防抖）
+PINCH_THRESHOLD = 0.090             # 显著提高：更容易触发，不用捏太紧
+PINCH_RELEASE_THRESHOLD = 0.150     # 保持高位：非常不容易断触
 SWIPE_THRESHOLD = 0.15
 SWIPE_COOLDOWN_FRAMES = 20
 SWIPE_VELOCITY_THRESHOLD = 0.008
-PINCH_CONFIRM_FRAMES = 1            # 捏合确认帧数
-PINCH_RELEASE_CONFIRM_FRAMES = 1    # 释放确认帧数
+PINCH_CONFIRM_FRAMES = 1            # 恢复为1：立即响应，不延迟
+PINCH_RELEASE_CONFIRM_FRAMES = 4    # 增加到4：强力过滤抖动导致的断触
 
 # 速度感知捏合参数（新增）
 PINCH_VELOCITY_BOOST = 0.02         # 快速捏合时的阈值增益
@@ -80,23 +80,23 @@ PINCH_VELOCITY_BOOST = 0.02         # 快速捏合时的阈值增益
 PEN_COLOR = (0, 255, 255)  # BGR yellow
 PEN_THICKNESS = 6
 ERASER_SIZE = 40
-STROKE_JUMP_THRESHOLD = 150
-DRAW_LOCK_FRAMES = 3                # 笔画结束后的冷却帧数
+STROKE_JUMP_THRESHOLD = 200         # 增大=更少断笔
+DRAW_LOCK_FRAMES = 2                # 减少冷却，更快开始下一笔
 
 # Smoothing（分别控制鼠标和绘图）
 CURSOR_SMOOTHING_FACTOR = 0.15
-DRAW_SMOOTHING_FACTOR = 0.20
+DRAW_SMOOTHING_FACTOR = 0.15        # 显著降低：增强平滑度，消除锯齿
 
 # 1€ Filter 参数（自适应平滑：低速平滑，高速跟手）
-ONE_EURO_MIN_CUTOFF = 0.8           # 较低，增强平滑
-ONE_EURO_BETA = 0.007               # 较低，减少抖动
+ONE_EURO_MIN_CUTOFF = 0.5           # 降低：大幅增强慢速时的平滑度
+ONE_EURO_BETA = 0.002               # 降低：减少高速时的抖动
 
 # 贝塞尔曲线参数
-BEZIER_ENABLED = True               # 启用贝塞尔曲线平滑
-BEZIER_SEGMENTS = 8                 # 每段曲线的插值点数
+BEZIER_ENABLED = True               # 启用平滑
+BEZIER_SEGMENTS = 12                # 增加插值点，使曲线更圆润
 
 # 钢笔效果参数（新增）
-PEN_EFFECT_ENABLED = True           # 启用钢笔效果（速度感知粗细）
+PEN_EFFECT_ENABLED = False          # 关闭钢笔效果以提高稳定性
 PEN_MIN_THICKNESS_RATIO = 0.4       # 最细时的粗细比例（快速移动）
 PEN_MAX_THICKNESS_RATIO = 1.2       # 最粗时的粗细比例（慢速移动）
 PEN_SPEED_THRESHOLD = 25.0          # 速度阈值（像素/帧）

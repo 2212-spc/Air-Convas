@@ -46,6 +46,7 @@ from modules.gesture_ui import GestureUI
 from modules.ppt_gesture_controller import PPTGestureController
 from modules.temporary_ink import TemporaryInkManager
 from modules.visual_effects import EffectManager
+from modules.interactive_effects import InteractiveEffectsManager
 from modules.tutorial_manager import TutorialManager
 
 
@@ -95,6 +96,11 @@ def main() -> None:
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+    
+    # 摄像头优化设置 - 提高清晰度
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # 关闭自动对焦
+    cap.set(cv2.CAP_PROP_FOCUS, 0)       # 手动对焦 (0=无限远, 根据需要调整)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 减少缓冲延迟
 
     # 创建可调整大小的窗口
     cv2.namedWindow(config.WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
@@ -173,6 +179,15 @@ def main() -> None:
         smoothing_factor=getattr(config, 'CURSOR_SMOOTHING_FACTOR', 0.15),
         smoothing_mode='one_euro',
         one_euro_min_cutoff=one_euro_min_cutoff,
+    )
+    
+    # UI选择专用mapper（无平滑，直接跟踪指尖）
+    ui_mapper = CoordinateMapper(
+        (config.CAMERA_WIDTH, config.CAMERA_HEIGHT),
+        getattr(config, 'ACTIVE_REGION_DRAW', (0.0, 0.0, 1.0, 1.0)),
+        smoothing_factor=0.0,  # 无平滑，直接响应
+        smoothing_mode='ema',
+        one_euro_min_cutoff=one_euro_min_cutoff,
         one_euro_beta=one_euro_beta,
     )
 
@@ -224,6 +239,10 @@ def main() -> None:
     palm_hud = PalmHUD()
     temp_ink_manager = TemporaryInkManager(default_lifetime=1.5)  # 激光笔笔迹持续1.5秒
     effect_manager = EffectManager()
+    
+    # 互动特效管理器
+    interactive_effects = InteractiveEffectsManager(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
+    ENABLE_INTERACTIVE_EFFECTS = False  # 特效模式开关
 
     # 手势UI界面
     gesture_ui = GestureUI(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
@@ -325,6 +344,7 @@ def main() -> None:
         ui_pinching = False
         ui_pinch_dist = 0.0
         palm_pos_for_hud = None
+        index_tip_pt = None  # UI选择专用点（无平滑）
         palm_pos_pixel = None
         g = None  # 手势结果
 
@@ -379,6 +399,9 @@ def main() -> None:
                 draw_pt = draw_mapper.map(tip_norm)
                 erase_pt = draw_mapper.map(palm_norm)
                 screen_pt = cursor_mapper.map(index_norm)
+                
+                # UI选择专用点（无平滑，直接跟踪食指尖）
+                index_tip_pt = ui_mapper.map(index_norm)
 
                 # 更新掌心HUD位置
                 palm_pos_for_hud = palm_norm
@@ -438,37 +461,31 @@ def main() -> None:
                         print(f"工具切换到: {brush_manager.tool}")
 
                 # ========== 手势UI交互 ==========
-                if g["index_middle"]:
-                    if not hasattr(gesture_ui, '_two_finger_triggered'):
-                        gesture_ui._two_finger_triggered = False
-                    if not gesture_ui._two_finger_triggered:
-                        gesture_ui.toggle_visibility()
-                        gesture_ui._two_finger_triggered = True
-                        print(f"UI {'显示' if gesture_ui.visible else '隐藏'}")
-                else:
-                    if hasattr(gesture_ui, '_two_finger_triggered'):
-                        gesture_ui._two_finger_triggered = False
+                # 禁用双指切换UI（容易误触），改用键盘 'u' 键切换
+                # if g["index_middle"]:
+                #     ...
+                pass  # UI切换已移至键盘快捷键
 
                 # 更新UI悬停状态（在非捏合状态下更新）
-                if gesture_ui.visible:
+                if gesture_ui.visible and index_tip_pt is not None:
                     if not g["pinching"]:
-                        hover_item = gesture_ui.update_hover(draw_pt, brush_manager)
+                        hover_item = gesture_ui.update_hover(index_tip_pt, brush_manager)
 
                 # 捏合选择UI项 / 停留自动选择（仅工具/动作）
                 if gesture_ui.visible:
                     ui_action = None
-                    dwell_item = None
+                    dwell_selected = False
                     if g["pinch_start"] and gesture_ui.hover_item:
                         select_result = gesture_ui.select_hover_item(brush_manager)
                         ui_action = select_result["action"]
                     elif not g["pinching"]:
-                        dwell_item = gesture_ui.consume_dwell_item()
-                        if dwell_item:
-                            gesture_ui.hover_item = dwell_item
-                            select_result = gesture_ui.select_hover_item(brush_manager)
-                            ui_action = select_result["action"]
+                        # 使用新的悬停自动选择接口
+                        dwell_result = gesture_ui.consume_pending_selection(brush_manager)
+                        if dwell_result["selected"]:
+                            dwell_selected = True
+                            ui_action = dwell_result["action"]
 
-                    if ui_action or (gesture_ui.hover_item and (g["pinch_start"] or dwell_item)):
+                    if ui_action or (gesture_ui.hover_item and (g["pinch_start"] or dwell_selected)):
                         item_type, _ = gesture_ui.hover_item
                         if item_type == "tool":
                             print(f"工具切换到: {brush_manager.tool}")
@@ -491,6 +508,11 @@ def main() -> None:
                                 if not ENABLE_PARTICLES:
                                     particle_system.clear()
                                 print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
+                            elif ui_action == "effects":
+                                ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
+                                undo_redo_hint = f"Effects: {interactive_effects.get_effect_label()}"
+                                undo_redo_hint_frames = 45
+                                print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'}")
 
                         draw_lock = DRAW_LOCK_FRAMES
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 255))
@@ -532,6 +554,12 @@ def main() -> None:
                                             particle_system.clear()
                                         effect_manager.add_ripple(mouse_click_pos, color=(0, 255, 0))
                                         print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
+                                    elif action_key == "effects":
+                                        ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
+                                        undo_redo_hint = f"Effects: {interactive_effects.get_effect_label()}"
+                                        undo_redo_hint_frames = 45
+                                        effect_manager.add_ripple(mouse_click_pos, color=(255, 200, 0))
+                                        print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'}")
                             
                             draw_lock = DRAW_LOCK_FRAMES
                     
@@ -631,6 +659,12 @@ def main() -> None:
             effect_manager.update()
             if ENABLE_PARTICLES:
                 particle_system.update()
+            
+            # 互动特效更新
+            if ENABLE_INTERACTIVE_EFFECTS:
+                is_open_palm = (sum(g["fingers"]) >= 4) if g else False  # 4+手指张开=张开手掌
+                is_pinching = g["pinching"] if g else False
+                interactive_effects.update(ui_draw_pt, is_open_palm, is_pinching)
 
             frame = overlay_canvas(frame, canvas.get_canvas())
 
@@ -645,6 +679,12 @@ def main() -> None:
                     laser_pointer.render(frame, ui_draw_pt)
 
             effect_manager.render(frame)
+            
+            # 渲染互动特效
+            if ENABLE_INTERACTIVE_EFFECTS:
+                is_open_palm = (sum(g["fingers"]) >= 4) if g else False  # 4+手指张开=张开手掌
+                is_pinching = g["pinching"] if g else False
+                interactive_effects.render(frame, ui_draw_pt, is_open_palm, is_pinching)
 
             if ENABLE_PALM_HUD and palm_pos_for_hud and palm_pos_pixel:
                 palm_hud.update(palm_pos_for_hud)
@@ -663,6 +703,10 @@ def main() -> None:
                     cv2.circle(frame, ui_draw_pt, config.ERASER_SIZE, (0, 0, 255), 2, lineType=cv2.LINE_AA)
                     if g and g["pinching"]:
                         cv2.circle(frame, ui_draw_pt, 5, (255, 255, 255), -1, lineType=cv2.LINE_AA)
+                    
+            # UI选择指示点（绿色小点，显示在食指尖位置）
+            if index_tip_pt is not None and gesture_ui.visible:
+                cv2.circle(frame, index_tip_pt, 4, (0, 255, 0), -1, lineType=cv2.LINE_AA)
                 
             if g and g["pinching"]:
                 cv2.putText(frame, f"pinch: {ui_pinch_dist:.3f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
@@ -748,7 +792,10 @@ def main() -> None:
                 cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
 
             # 渲染手势UI界面
-            gesture_ui.render(frame, brush_manager, action_state={"particles": ENABLE_PARTICLES})
+            gesture_ui.render(frame, brush_manager, action_state={
+                "particles": ENABLE_PARTICLES, 
+                "effects": ENABLE_INTERACTIVE_EFFECTS
+            })
 
             # 渲染Help按钮（如果教程已完成）
             help_cursor_pos = None
@@ -820,10 +867,21 @@ def main() -> None:
             ENABLE_PALM_HUD = not ENABLE_PALM_HUD
             palm_hud.reset()
             print(f"Palm HUD: {'ON' if ENABLE_PALM_HUD else 'OFF'}")
+        if key == ord('4'):
+            ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
+            print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'} - {interactive_effects.get_effect_label()}")
+        if key == ord('5'):
+            # 切换特效类型
+            if ENABLE_INTERACTIVE_EFFECTS:
+                effect_name = interactive_effects.next_effect()
+                print(f"Effect switched to: {interactive_effects.get_effect_label()}")
         if key == ord('l'):
             ENABLE_LINE_ASSIST = not ENABLE_LINE_ASSIST
             shape_recognizer.set_line_assist(ENABLE_LINE_ASSIST)
             print(f"Line assist: {'ON' if ENABLE_LINE_ASSIST else 'OFF'}")
+        if key == ord('u'):
+            gesture_ui.toggle_visibility()
+            print(f"UI: {'ON' if gesture_ui.visible else 'OFF'}")
         if key == ord('r'):
             palm_hud.reset_timer()
             print("Timer reset")
