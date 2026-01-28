@@ -224,8 +224,8 @@ class GestureUI:
         result["item_type"] = item_type
         result["selected"] = True
         
-        # 触发选中闪烁效果
-        self._selection_flash = 10
+        # 触发选中高亮效果（持续5帧，约0.17秒）
+        self._selection_flash = 5
         self._last_selected = (item_type, index)
 
         if item_type == "tool":
@@ -252,8 +252,8 @@ class GestureUI:
         result["item_type"] = item_type
         result["selected"] = True
         
-        # 触发选中闪烁效果
-        self._selection_flash = 10
+        # 触发选中高亮效果（持续5帧，约0.17秒）
+        self._selection_flash = 5
         self._last_selected = (item_type, index)
 
         if item_type == "tool":
@@ -325,9 +325,9 @@ class GestureUI:
             is_hover = (self.hover_item == ("tool", i))
             is_flash = (self._selection_flash > 0 and self._last_selected == ("tool", i))
             
-            # 背景颜色
-            if is_flash and self._selection_flash % 2 == 0:
-                bg_color = (100, 200, 100)  # 选中闪烁绿色
+            # 背景颜色 (选中时平滑高亮，不闪烁)
+            if is_flash:
+                bg_color = (100, 200, 100)  # 选中高亮绿色
             elif is_selected:
                 bg_color = (120, 90, 60)  # 选中深蓝
             elif is_hover:
@@ -359,8 +359,8 @@ class GestureUI:
             is_active = bool(action_state.get(action_key, False))
             is_flash = (self._selection_flash > 0 and self._last_selected == ("action", i))
 
-            if is_flash and self._selection_flash % 2 == 0:
-                bg_color = (100, 200, 100)
+            if is_flash:
+                bg_color = (100, 200, 100)  # 选中高亮绿色
             elif is_active:
                 bg_color = (50, 100, 50)
             elif is_hover:
@@ -390,8 +390,8 @@ class GestureUI:
             radius = self.color_button_size // 2
             if is_hover:
                 radius += 4
-            if is_flash and self._selection_flash % 2 == 0:
-                radius += 6
+            if is_flash:
+                radius += 6  # 选中时放大，不闪烁
 
             # 颜色圆
             cv2.circle(overlay, (x, y), radius, color, -1, lineType=cv2.LINE_AA)
@@ -418,8 +418,8 @@ class GestureUI:
             is_hover = (self.hover_item == ("thickness", i))
             is_flash = (self._selection_flash > 0 and self._last_selected == ("thickness", i))
 
-            if is_flash and self._selection_flash % 2 == 0:
-                bg_color = (100, 200, 100)
+            if is_flash:
+                bg_color = (100, 200, 100)  # 选中高亮绿色
             elif is_hover:
                 bg_color = (80, 80, 80)
             else:
@@ -447,8 +447,8 @@ class GestureUI:
             is_hover = (self.hover_item == ("brush", i))
             is_flash = (self._selection_flash > 0 and self._last_selected == ("brush", i))
 
-            if is_flash and self._selection_flash % 2 == 0:
-                bg_color = (100, 200, 100)
+            if is_flash:
+                bg_color = (100, 200, 100)  # 选中高亮绿色
             elif is_selected:
                 bg_color = (120, 90, 60)
             elif is_hover:

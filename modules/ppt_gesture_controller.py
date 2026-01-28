@@ -35,7 +35,7 @@ except Exception:
 SMOOTHING_FACTOR = 0.7
 
 # 模式切换确认时间 (秒)
-CONFIRM_DELAY = 1.0
+CONFIRM_DELAY = 0.3  # 减少到300ms，更快响应 (was 1.0)
 
 # 手指伸直检测容差 (归一化坐标，0.0~1.0)
 # 允许指尖稍微在关节下方，仍然判定为伸直
@@ -63,13 +63,13 @@ NEUTRAL_ZONE_Y_MIN = 0
 NEUTRAL_ZONE_Y_MAX = 1
 NEUTRAL_STAY_FRAMES = 10  # 在安全区停留的帧数才认为归位
 
-# OneEuroFilter 参数
-ONEEURO_MIN_CUTOFF = 1.0  # 最小截止频率 (Hz)
-ONEEURO_BETA = 0.007       # 速度系数
+# OneEuroFilter 参数 (优化：更平滑的光标移动)
+ONEEURO_MIN_CUTOFF = 0.8   # 降低：更强的低速平滑 (was 1.0)
+ONEEURO_BETA = 0.005       # 降低：减少高速抖动 (was 0.007)
 ONEEURO_DCUTOFF = 1.0      # 速度平滑截止频率
 
 # 状态机迟滞参数
-GESTURE_CONFIRM_FRAMES = 5  # 连续N帧确认才更新状态
+GESTURE_CONFIRM_FRAMES = 3  # 减少确认帧数，更快响应 (was 5)
 
 # --- 🏷️ 状态常量定义 ---
 MODE_NONE = 0
@@ -548,31 +548,24 @@ class PPTGestureController:
             finger_states.append(1 if is_extended else 0)
 
         # fingers = [拇指, 食指, 中指, 无名指, 小指]
-        # 实现排他性逻辑，确保手势不会相互混淆
+        # 恢复清晰的手势识别逻辑
         
-        # 手势1 (MODE_PEN): 只有食指伸直，其他必须弯曲
-        # 负向条件：中指、无名指、小指必须处于弯曲状态
+        # 手势3 (MODE_NAV): 食指+中指+无名指都伸直
         if (finger_states[1] == 1 and  # 食指伸直
-            finger_states[2] == 0 and  # 中指弯曲
-            finger_states[3] == 0 and  # 无名指弯曲
-            finger_states[4] == 0):    # 小指弯曲
-            return MODE_PEN
+            finger_states[2] == 1 and  # 中指伸直
+            finger_states[3] == 1):    # 无名指伸直
+            return MODE_NAV
         
-        # 手势2 (MODE_ERASER): 食指+中指伸直，无名指和小指必须弯曲
-        # 负向条件：无名指、小指必须弯曲
+        # 手势2 (MODE_ERASER): 食指+中指伸直，无名指弯曲
         elif (finger_states[1] == 1 and  # 食指伸直
               finger_states[2] == 1 and  # 中指伸直
-              finger_states[3] == 0 and  # 无名指弯曲
-              finger_states[4] == 0):    # 小指弯曲
+              finger_states[3] == 0):    # 无名指弯曲
             return MODE_ERASER
         
-        # 手势3 (MODE_NAV): 食指+中指+无名指伸直（美式）
-        # 允许小指稍微弯曲（因为解剖学限制）
+        # 手势1 (MODE_PEN): 食指伸直，中指弯曲
         elif (finger_states[1] == 1 and  # 食指伸直
-              finger_states[2] == 1 and  # 中指伸直
-              finger_states[3] == 1):   # 无名指伸直
-            # 小指可以稍微弯曲，不严格要求
-            return MODE_NAV
+              finger_states[2] == 0):    # 中指弯曲
+            return MODE_PEN
 
         return MODE_NONE  # 默认
 
@@ -659,11 +652,11 @@ class PPTGestureController:
         # 调试信息：将捏合比率存入实例变量供UI显示
         self.last_pinch_ratio = pinch_ratio
         
-        # 迟滞阈值设置 (优化后的参数)
-        # 0.20: 需要捏得比较紧才触发 (防误触) -> 放宽到 0.28
-        # 0.40: 需要松开得比较大才断开 (防断连) -> 放宽到 0.50
-        PINCH_TRIGGER_THRESHOLD = 0.28
-        PINCH_RELEASE_THRESHOLD = 0.50
+        # 迟滞阈值设置 (与主画布对齐)
+        # 更宽松的触发阈值，更容易开始写字
+        # 更大的迟滞区间，减少断笔
+        PINCH_TRIGGER_THRESHOLD = 0.35   # 更宽松 (was 0.28)
+        PINCH_RELEASE_THRESHOLD = 0.55   # 更大迟滞 (was 0.50)
 
         # 状态机逻辑
         if self.mouse_down:
@@ -704,7 +697,7 @@ class PPTGestureController:
         # --- 子帧插值平滑逻辑 ---
         # 即使使用了平滑器，直接跳到 curr_x, curr_y 也可能在 30fps 下显卡顿
         # 我们在两帧之间生成中间点，模拟高频鼠标事件
-        INTERPOLATION_STEPS = 2  # 插入中间点的数量 (2-3比较合适)
+        INTERPOLATION_STEPS = 4  # 增加插值点数量，更平滑 (was 2)
         
         # 获取上一次的位置 (如果这是第一帧，就用当前位置)
         start_x, start_y = self.prev_x, self.prev_y

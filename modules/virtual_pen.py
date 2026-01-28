@@ -160,6 +160,20 @@ class VirtualPen:
             return
         
         p0, p1, p2, p3 = self._window[-4], self._window[-3], self._window[-2], self._window[-1]
+
+        # 小字/慢写时常见问题：Catmull-Rom 会把近似直线拉成不自然弧线
+        # 这里加入“直线保护”：四点近似共线时直接画线段，避免弧线化
+        vx = p3[0] - p0[0]
+        vy = p3[1] - p0[1]
+        denom = (vx * vx + vy * vy) ** 0.5 + 1e-6
+        ux = p2[0] - p1[0]
+        uy = p2[1] - p1[1]
+        cross = abs(vx * uy - vy * ux)
+        # cross/denom 近似表示“偏离直线的像素量”
+        if (cross / denom) < 2.0:
+            self._draw_line_segment(p1, p2, thickness)
+            self._last_curve_end = p2
+            return
         
         # 计算曲线点
         curve_points = catmull_rom_spline(p0, p1, p2, p3, self.bezier_segments)
@@ -192,11 +206,22 @@ class VirtualPen:
 
         # 位置跳变检测
         if self.prev_point is not None and speed > self.jump_threshold:
-            self._stroke_broken = True
+            # raw 点抖动时可能出现瞬时跳变，直接断笔会造成“断断续续”
+            # 分两档处理：
+            # - 中等跳变：画一段直线桥接，避免断笔
+            # - 巨大跳变：真正断笔（避免跨屏长线）
+            hard_break = self.jump_threshold * 2
+            if speed <= hard_break:
+                self._draw_line_segment(self.prev_point, point, thickness)
+                # 继续笔画，但重置曲线窗口，避免曲线形变
+                self._window = [point]
+                self._last_curve_end = point
+            else:
+                self._stroke_broken = True
+                self._window = [point]
+                self._last_curve_end = None
             self.prev_point = point
             self.points.append(point)
-            self._window = [point]
-            self._last_curve_end = None
             return point
 
         # 添加到窗口和点列表

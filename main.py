@@ -97,10 +97,18 @@ def main() -> None:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
     
-    # 摄像头优化设置 - 提高清晰度
-    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # 关闭自动对焦
-    cap.set(cv2.CAP_PROP_FOCUS, 0)       # 手动对焦 (0=无限远, 根据需要调整)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 减少缓冲延迟
+    # 摄像头优化设置 - 彻底禁用自动对焦，防止画面一会虚一会清
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)       # 关闭自动对焦
+    cap.set(cv2.CAP_PROP_FOCUS, 30)          # 手动对焦值 (30适合手臂距离，可调 0-255)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)      # 减少缓冲延迟
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)   # 自动曝光模式 (3=自动，让摄像头自己调亮度)
+    # 如果还是太暗，取消下面这行的注释并调整数值：
+    # cap.set(cv2.CAP_PROP_BRIGHTNESS, 150)  # 亮度 (0-255)
+    
+    # 某些摄像头需要多次设置才生效
+    for _ in range(3):
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        cap.read()  # 读取一帧使设置生效
 
     # 创建可调整大小的窗口
     cv2.namedWindow(config.WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
@@ -109,7 +117,7 @@ def main() -> None:
     
     # 鼠标点击处理的全局变量
     mouse_clicked = False
-    mouse_click_pos = None
+    mouse_click_pos = None  # window coords (may be scaled if window resized)
     
     def mouse_callback(event, x, y, flags, param):
         """鼠标回调函数"""
@@ -120,6 +128,24 @@ def main() -> None:
     
     # 设置鼠标回调
     cv2.setMouseCallback(config.WINDOW_NAME, mouse_callback)
+
+    def map_mouse_to_frame(pos, frame_shape):
+        """Map mouse position from window coords to frame coords (handles window scaling)."""
+        if pos is None:
+            return None
+        fx_w = frame_shape[1]
+        fx_h = frame_shape[0]
+        try:
+            _, _, win_w, win_h = cv2.getWindowImageRect(config.WINDOW_NAME)
+        except Exception:
+            win_w, win_h = fx_w, fx_h
+        sx = fx_w / max(1, win_w)
+        sy = fx_h / max(1, win_h)
+        x = int(pos[0] * sx)
+        y = int(pos[1] * sy)
+        x = max(0, min(fx_w - 1, x))
+        y = max(0, min(fx_h - 1, y))
+        return (x, y)
 
     # 推理分辨率
     INFER_W = getattr(config, 'INFER_WIDTH', 640)
@@ -166,6 +192,18 @@ def main() -> None:
         smoothing_mode='one_euro',
         one_euro_min_cutoff=one_euro_min_cutoff,
         one_euro_beta=one_euro_beta,
+    )
+
+    # 低延迟“书写点”专用 mapper：
+    # - 和黄色点/实际绘制共用，保证位置对齐
+    # - 保留少量平滑，避免 raw 点抖动导致断笔
+    ink_mapper = CoordinateMapper(
+        (config.CAMERA_WIDTH, config.CAMERA_HEIGHT),
+        getattr(config, 'ACTIVE_REGION_DRAW', (0.0, 0.0, 1.0, 1.0)),
+        smoothing_factor=getattr(config, 'DRAW_SMOOTHING_FACTOR', 0.3),
+        smoothing_mode='one_euro',
+        one_euro_min_cutoff=max(1.2, one_euro_min_cutoff),  # 更快响应，减少滞后
+        one_euro_beta=max(0.008, one_euro_beta),            # 更跟手，减少“拖影”
     )
 
     if pyautogui:
@@ -272,6 +310,11 @@ def main() -> None:
 
     # 钢笔效果开关
     ENABLE_PEN_EFFECT = getattr(config, 'PEN_EFFECT_ENABLED', True)
+    
+    # 图形识别停留检测（只有停留超过阈值才触发图形美化）
+    SHAPE_DWELL_FRAMES = 15  # 需要停留的帧数（约0.5秒@30fps）
+    SHAPE_DWELL_THRESHOLD = 20  # 停留判定的移动阈值（像素）
+    stroke_end_positions = []  # 记录最近的笔画位置
 
     # 显示帮助信息
     SHOW_HELP = False
@@ -311,8 +354,9 @@ def main() -> None:
             
             # 检测鼠标点击
             if mouse_clicked:
-                if mouse_click_pos:
-                    tutorial_manager.handle_click(mouse_click_pos)
+                mapped = map_mouse_to_frame(mouse_click_pos, frame.shape)
+                if mapped:
+                    tutorial_manager.handle_click(mapped)
                 mouse_clicked = False
                 mouse_click_pos = None
             
@@ -385,30 +429,33 @@ def main() -> None:
                 middle_norm = hand.landmarks_norm[MIDDLE_TIP]
                 palm_norm = palm_center(hand)
 
-                # 笔尖位置：捏合时用拇指食指中心点，其他时候用食指尖
-                if g["pinching"] or current_mode == "active" or brush_manager.tool == "laser":
+                # 笔尖位置计算
+                if g["pinching"]:
+                    # 捏合时：笔尖在拇指和食指的接触点
                     tip_norm = (
                         (index_norm[0] + thumb_norm[0]) / 2.0,
                         (index_norm[1] + thumb_norm[1]) / 2.0
                     )
-                    if not g["pinching"]: # 如果不是捏合状态，就用食指尖
-                         tip_norm = index_norm
                 else:
+                    # 非捏合时：用食指尖位置
                     tip_norm = index_norm
 
+                # 绘图用的点（有平滑，用于实际绘画）
                 draw_pt = draw_mapper.map(tip_norm)
                 erase_pt = draw_mapper.map(palm_norm)
                 screen_pt = cursor_mapper.map(index_norm)
                 
-                # UI选择专用点（无平滑，直接跟踪食指尖）
+                # UI显示用的点（无平滑，与手指实际位置对齐）
                 index_tip_pt = ui_mapper.map(index_norm)
+                # 书写点（低延迟平滑）：黄色点与实际绘制都使用它
+                ink_pt = ink_mapper.map(tip_norm)
 
                 # 更新掌心HUD位置
                 palm_pos_for_hud = palm_norm
                 palm_pos_pixel = draw_mapper.map(palm_norm)
 
-                # 记录UI提示点位
-                ui_draw_pt = draw_pt
+                # 记录UI提示点位（黄色点与实际绘制对齐）
+                ui_draw_pt = ink_pt
                 ui_erase_pt = erase_pt if brush_manager.tool == "eraser" else None
                 ui_pinching = g["pinching"]
                 ui_pinch_dist = g["pinch_distance"]
@@ -517,55 +564,6 @@ def main() -> None:
                         draw_lock = DRAW_LOCK_FRAMES
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 255))
                 
-                # 鼠标点击UI选择
-                if mouse_clicked and mouse_click_pos:
-                    # 如果UI可见，处理UI点击
-                    if gesture_ui.visible:
-                        if gesture_ui.handle_mouse_click(mouse_click_pos, brush_manager):
-                            # 处理UI动作
-                            if gesture_ui.hover_item:
-                                item_type, _ = gesture_ui.hover_item
-                                if item_type == "tool":
-                                    print(f"工具切换到: {brush_manager.tool}")
-                                    effect_manager.add_ripple(mouse_click_pos, color=(255, 255, 0))
-                                elif item_type == "color":
-                                    print(f"颜色切换到: {brush_manager.color_name}")
-                                    effect_manager.add_ripple(mouse_click_pos, color=brush_manager.color)
-                                elif item_type == "thickness":
-                                    print(f"粗细切换到: {brush_manager.thickness}")
-                                    effect_manager.add_ripple(mouse_click_pos, color=(0, 255, 255))
-                                elif item_type == "brush":
-                                    print(f"笔刷切换到: {brush_manager.brush_type}")
-                                    effect_manager.add_ripple(mouse_click_pos, color=(255, 0, 255))
-                                elif item_type == "action":
-                                    # 执行动作
-                                    action_key = gesture_ui.action_items[gesture_ui.hover_item[1]][0]
-                                    if action_key == "clear":
-                                        canvas.clear()
-                                        temp_ink_manager.clear()
-                                        particle_system.clear()
-                                        undo_redo_hint = "Clear"
-                                        undo_redo_hint_frames = 30
-                                        effect_manager.add_ripple(mouse_click_pos, color=(255, 0, 0))
-                                        print("画布已清空")
-                                    elif action_key == "particles":
-                                        ENABLE_PARTICLES = not ENABLE_PARTICLES
-                                        if not ENABLE_PARTICLES:
-                                            particle_system.clear()
-                                        effect_manager.add_ripple(mouse_click_pos, color=(0, 255, 0))
-                                        print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
-                                    elif action_key == "effects":
-                                        ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
-                                        undo_redo_hint = f"Effects: {interactive_effects.get_effect_label()}"
-                                        undo_redo_hint_frames = 45
-                                        effect_manager.add_ripple(mouse_click_pos, color=(255, 200, 0))
-                                        print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'}")
-                            
-                            draw_lock = DRAW_LOCK_FRAMES
-                    
-                    # 无论是否点击到按钮，都清除鼠标点击标志
-                    mouse_clicked = False
-                    mouse_click_pos = None
 
                 # ========== 工具逻辑 (基于当前选中的Tool执行) ==========
                 
@@ -603,18 +601,23 @@ def main() -> None:
                     else:
                         # 不在死区，正常画画
                         if brush_manager.tool == "pen":
-                            # 画笔模式
-                            smoothed_pt = pen.draw(draw_pt)
+                            # 画笔模式 - 使用低延迟平滑点，与黄色指示点一致
+                            smoothed_pt = pen.draw(ink_pt)
                             if ENABLE_PARTICLES:
-                                particle_system.emit(draw_pt, brush_manager.color)
+                                particle_system.emit(ink_pt, brush_manager.color)
+                            
+                            # 记录最近位置用于图形识别停留检测
+                            stroke_end_positions.append(ink_pt)
+                            if len(stroke_end_positions) > SHAPE_DWELL_FRAMES:
+                                stroke_end_positions.pop(0)
                         
                         elif brush_manager.tool == "eraser":
                             # 橡皮模式 (捏合时擦除)
-                            eraser.erase(draw_pt)
+                            eraser.erase(ink_pt)
                             
                         elif brush_manager.tool == "laser":
                             # 激光笔模式 (捏合时画轨迹)
-                            temp_ink_manager.add_point(draw_pt)
+                            temp_ink_manager.add_point(ink_pt)
                 
                 # 3. 结束动作 (捏合结束)
                 if g["pinch_end"]:
@@ -625,18 +628,36 @@ def main() -> None:
                         finished_points = pen.end_stroke()
                         draw_lock = DRAW_LOCK_FRAMES
                         if finished_points:
-                            # 图形识别与美化
-                            beautified = shape_recognizer.beautify(
-                                finished_points,
-                                canvas.get_canvas(),
-                                brush_manager.color,
-                                brush_manager.thickness,
-                            )
+                            # 检测是否停留足够久才触发图形识别
+                            # 计算最近位置的移动距离
+                            should_beautify = False
+                            if len(stroke_end_positions) >= SHAPE_DWELL_FRAMES:
+                                # 计算最近SHAPE_DWELL_FRAMES帧的总移动距离
+                                total_movement = 0
+                                for i in range(1, len(stroke_end_positions)):
+                                    p1 = stroke_end_positions[i-1]
+                                    p2 = stroke_end_positions[i]
+                                    total_movement += np.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
+                                
+                                # 如果移动很小，说明用户在停留
+                                if total_movement < SHAPE_DWELL_THRESHOLD:
+                                    should_beautify = True
+                            
+                            # 只有停留时才触发图形美化
+                            if should_beautify:
+                                beautified = shape_recognizer.beautify(
+                                    finished_points,
+                                    canvas.get_canvas(),
+                                    brush_manager.color,
+                                    brush_manager.thickness,
+                                )
+                                if beautified:
+                                    print(f"识别到图形: {beautified}")
+                                    center = np.mean(finished_points, axis=0).astype(int)
+                                    effect_manager.add_ripple(tuple(center), color=(0, 255, 0))
+                            
                             canvas.save_stroke()
-                            if beautified:
-                                print(f"识别到图形: {beautified}")
-                                center = np.mean(finished_points, axis=0).astype(int)
-                                effect_manager.add_ripple(tuple(center), color=(0, 255, 0))
+                            stroke_end_positions.clear()  # 清空位置记录
                     
                     elif brush_manager.tool == "laser":
                         temp_ink_manager.end_stroke()
@@ -652,6 +673,53 @@ def main() -> None:
                 palm_hud.reset()
                 gesture.reset_pinch_history()
                 is_drawing = False  # 清除画画状态
+
+            # ========== 鼠标点击处理（移到 if hands: 外面，确保无手时也能点击）==========
+            if mouse_clicked:
+                mapped = map_mouse_to_frame(mouse_click_pos, frame.shape)
+                consumed = False
+
+                if mapped and gesture_ui.visible:
+                    if gesture_ui.handle_mouse_click(mapped, brush_manager):
+                        consumed = True
+                        if gesture_ui.hover_item:
+                            item_type, _ = gesture_ui.hover_item
+                            # 鼠标点击不加波纹特效，避免视觉波动
+                            if item_type == "tool":
+                                print(f"工具切换到: {brush_manager.tool}")
+                            elif item_type == "color":
+                                print(f"颜色切换到: {brush_manager.color_name}")
+                            elif item_type == "thickness":
+                                print(f"粗细切换到: {brush_manager.thickness}")
+                            elif item_type == "brush":
+                                print(f"笔刷切换到: {brush_manager.brush_type}")
+                            elif item_type == "action":
+                                action_key = gesture_ui.action_items[gesture_ui.hover_item[1]][0]
+                                if action_key == "clear":
+                                    canvas.clear()
+                                    temp_ink_manager.clear()
+                                    particle_system.clear()
+                                    undo_redo_hint = "Clear"
+                                    undo_redo_hint_frames = 30
+                                    print("画布已清空")
+                                elif action_key == "particles":
+                                    ENABLE_PARTICLES = not ENABLE_PARTICLES
+                                    if not ENABLE_PARTICLES:
+                                        particle_system.clear()
+                                    print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
+                                elif action_key == "effects":
+                                    ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
+                                    undo_redo_hint = f"Effects: {interactive_effects.get_effect_label()}"
+                                    undo_redo_hint_frames = 45
+                                    print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'}")
+                        draw_lock = DRAW_LOCK_FRAMES
+
+                # 如果不是UI点击，则允许Help按钮等处理鼠标点击
+                if mapped and not consumed:
+                    tutorial_manager.handle_click(mapped)
+
+                mouse_clicked = False
+                mouse_click_pos = None
 
             # ========== 特效更新与渲染 ==========
             
@@ -806,13 +874,7 @@ def main() -> None:
             # 检测Help按钮点击（捏合手势）
             if g and g["pinch_start"] and help_cursor_pos:
                 tutorial_manager.handle_click(help_cursor_pos)
-            
-            # 检测Help按钮鼠标点击
-            if mouse_clicked:
-                if mouse_click_pos:
-                    tutorial_manager.handle_click(mouse_click_pos)
-                mouse_clicked = False
-                mouse_click_pos = None
+            # Help按钮鼠标点击已在上方统一处理（含坐标映射）
 
         cv2.imshow(config.WINDOW_NAME, frame)
         key = cv2.waitKey(1) & 0xFF
@@ -909,6 +971,25 @@ def main() -> None:
             ENABLE_PEN_EFFECT = not ENABLE_PEN_EFFECT
             pen.enable_pen_effect = ENABLE_PEN_EFFECT
             print(f"Pen effect: {'ON' if ENABLE_PEN_EFFECT else 'OFF'}")
+        # PPT模式手动切换快捷键
+        if key == ord('i') and APP_MODE == "PPT":
+            # 'i' = ink/画笔模式
+            from modules.ppt_gesture_controller import MODE_PEN
+            ppt_controller.current_mode = MODE_PEN
+            ppt_controller.trigger_mode_switch_shortcut()
+            print("PPT: 手动切换到画笔模式")
+        if key == ord('e') and APP_MODE == "PPT":
+            # 'e' = eraser/橡皮模式
+            from modules.ppt_gesture_controller import MODE_ERASER
+            ppt_controller.current_mode = MODE_ERASER
+            ppt_controller.trigger_mode_switch_shortcut()
+            print("PPT: 手动切换到橡皮模式")
+        if key == ord('n') and APP_MODE == "PPT":
+            # 'n' = navigation/导航模式
+            from modules.ppt_gesture_controller import MODE_NAV
+            ppt_controller.current_mode = MODE_NAV
+            ppt_controller.trigger_mode_switch_shortcut()
+            print("PPT: 手动切换到导航模式")
         if key == ord('w'):
             FULLSCREEN = not FULLSCREEN
             if FULLSCREEN:

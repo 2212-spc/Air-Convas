@@ -151,7 +151,7 @@ class GestureRecognizer:
         """
         fingers = self.fingers_up(hand)
 
-        # 捏合检测
+        # 捏合检测（加入手掌尺度自适应，解决“写字小/远近变化”导致的灵敏度不一致）
         thumb_tip = hand.landmarks_norm[THUMB_TIP]
         index_tip = hand.landmarks_norm[INDEX_TIP]
         pinch_dist = point_distance(thumb_tip, index_tip)
@@ -161,16 +161,47 @@ class GestureRecognizer:
         pinch_start = False
         pinch_end = False
 
-        adaptive_threshold = self._get_adaptive_threshold(self.pinch_threshold)
+        # 用掌宽做尺度（食指MCP到小指MCP），将绝对阈值按手远近缩放
+        index_mcp = hand.landmarks_norm[5]
+        pinky_mcp = hand.landmarks_norm[17]
+        palm_width = point_distance(index_mcp, pinky_mcp)
+        ref_palm_width = 0.22  # 经验参考（归一化）；越大越“灵敏”
+        scale = max(0.6, min(1.6, palm_width / max(ref_palm_width, 1e-6)))
+
+        adaptive_threshold = self._get_adaptive_threshold(self.pinch_threshold * scale)
+        release_threshold = self.pinch_release_threshold * scale
 
         if pinch_dist < adaptive_threshold:
-            self._pinch_on_count += 1
+            # 防误触：在阈值附近“轻微张开/悬停不动”时不计入捏合确认
+            # 典型场景：两指靠得很近但没有真正捏合，pinch_dist 会在阈值附近小幅抖动
+            if not self.pinch_active:
+                hover_band = 0.012  # 阈值附近带宽（归一化）
+                near_threshold = (adaptive_threshold - hover_band) < pinch_dist < adaptive_threshold
+                low_velocity = abs(self._pinch_velocity) < 0.002
+                if near_threshold and low_velocity:
+                    # 不累积确认帧，但也不回退（避免“慢捏合永远触发不了”）
+                    pass
+                else:
+                    self._pinch_on_count += 1
+            else:
+                self._pinch_on_count += 1
             self._pinch_off_count = 0
-        elif pinch_dist > self.pinch_release_threshold:
+        elif pinch_dist > release_threshold:
             self._pinch_off_count += 1
             self._pinch_on_count = 0
 
-        if not self.pinch_active and self._pinch_on_count >= self.pinch_confirm_frames:
+        # 进入捏合确认：慢动作更严格（2帧），快速捏合仍保持灵敏（1帧）
+        required_on = self.pinch_confirm_frames
+        if not self.pinch_active:
+            # 快速合拢：1帧触发
+            if self._pinch_velocity < -0.01:
+                required_on = min(required_on, 1)
+            else:
+                # 慢动作：只有在“非常接近”阈值时才需要2帧，避免牺牲灵敏度
+                deep_pinch = pinch_dist < (adaptive_threshold - 0.018)
+                required_on = 1 if deep_pinch else max(required_on, 2)
+
+        if not self.pinch_active and self._pinch_on_count >= required_on:
             self.pinch_active = True
             pinch_start = True
         if self.pinch_active and self._pinch_off_count >= self.pinch_release_confirm_frames:
