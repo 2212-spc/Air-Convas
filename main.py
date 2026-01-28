@@ -233,7 +233,22 @@ def main() -> None:
 
     # --- PPT 控制器初始化 ---
     # 注入 cursor_mapper，确保 PPT 模式下的光标平滑度与绘图模式一致
-    ppt_controller = PPTGestureController(external_mp=True, cursor_mapper=cursor_mapper)
+    # 额外注入 PPT 相关阈值，提升“翻页/写字”稳定性
+    ppt_controller = PPTGestureController(
+        external_mp=True,
+        cursor_mapper=cursor_mapper,
+        confirm_delay=getattr(config, 'PPT_CONFIRM_DELAY', 0.25),
+        gesture_confirm_frames=getattr(config, 'PPT_GESTURE_CONFIRM_FRAMES', 5),
+        swipe_threshold=getattr(config, 'PPT_SWIPE_THRESHOLD', 0.18),
+        swipe_velocity_threshold=getattr(config, 'PPT_SWIPE_VELOCITY_THRESHOLD', 0.9),
+        swipe_cooldown=getattr(config, 'PPT_SWIPE_COOLDOWN', 0.35),
+        neutral_stay_frames=getattr(config, 'PPT_NEUTRAL_STAY_FRAMES', 4),
+        pinch_trigger_threshold=getattr(config, 'PPT_PINCH_TRIGGER_THRESHOLD', 0.33),
+        pinch_release_threshold=getattr(config, 'PPT_PINCH_RELEASE_THRESHOLD', 0.65),
+        auto_pen_on_pinch=True,
+        auto_pen_on_slide_change=True,
+        debug_overlay=True,
+    )
     APP_MODE = "DRAW"  # "DRAW" or "PPT"
 
     # 画布
@@ -489,7 +504,7 @@ def main() -> None:
             hud_data = {
                 "fps": fps,
                 "mode": "PPT",
-                "message": "Tab 键切换回画板"
+                "message": "Tab回画板 | i画笔 e橡皮 n导航 o叠加层 x清空 | NAV挥手翻页"
             }
             # 复用 UI 的 render 来画 PPT 状态
             gesture_ui.render(frame, brush_manager, hud_data=hud_data)
@@ -1018,6 +1033,14 @@ def main() -> None:
             ppt_controller.current_mode = MODE_NAV
             ppt_controller.trigger_mode_switch_shortcut()
             print("PPT: 手动切换到导航模式")
+        if key == ord('o') and APP_MODE == "PPT":
+            # 'o' = overlay/透明叠加层模式（在 PPT 上方画画）
+            overlay_on = ppt_controller.toggle_overlay_mode()
+            print(f"PPT: 透明叠加层 {'开启' if overlay_on else '关闭'}")
+        if key == ord('x') and APP_MODE == "PPT":
+            # 'x' = 清空透明叠加层
+            ppt_controller.clear_overlay()
+            print("PPT: 透明叠加层已清空")
         if key == ord('w'):
             FULLSCREEN = not FULLSCREEN
             if FULLSCREEN:

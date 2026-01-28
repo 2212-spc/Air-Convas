@@ -10,7 +10,7 @@ import pyautogui
 import time
 import math
 import numpy as np
-from collections import deque
+from collections import deque, Counter
 from core.coordinate_mapper import CoordinateMapper
 from utils.smoothing import catmull_rom_spline
 
@@ -21,6 +21,14 @@ try:
 except ImportError:
     COM_AVAILABLE = False
     print("警告: win32com不可用，将使用模拟按键作为降级方案")
+
+# 透明叠加层支持（当 COM 画线不可用时的备选方案）
+try:
+    from modules.transparent_overlay import get_overlay
+    OVERLAY_AVAILABLE = True
+except ImportError:
+    OVERLAY_AVAILABLE = False
+    print("警告: 透明叠加层不可用")
 
 # --- ⚙️ 配置区域 (Configuration) ---
 # 摄像头设置
@@ -55,18 +63,21 @@ PINCH_RATIO_THRESHOLD = 0.25  # 捏合距离小于手掌宽度的25%认为捏合
 
 # 挥手判定阈值 (归一化坐标，0.0~1.0)
 # 使用归一化坐标适配不同分辨率
-SWIPE_THRESHOLD = 0.3  # 约10%的归一化距离
+SWIPE_THRESHOLD = 0.18  # 归一化位移阈值：越小越容易触发
+
+# 挥手速度阈值（归一化坐标/秒）：避免“慢慢移动也翻页”
+SWIPE_VELOCITY_THRESHOLD = 0.9
 
 
 # 挥手冷却时间 (秒)
-SWIPE_COOLDOWN = 0.5
+SWIPE_COOLDOWN = 0.35
 
 # 空间复位逻辑参数（Neutral Zone）
 NEUTRAL_ZONE_X_MIN = 0.2  # 屏幕中央安全区（归一化坐标）
 NEUTRAL_ZONE_X_MAX = 0.8
 NEUTRAL_ZONE_Y_MIN = 0
 NEUTRAL_ZONE_Y_MAX = 1
-NEUTRAL_STAY_FRAMES = 10  # 在安全区停留的帧数才认为归位
+NEUTRAL_STAY_FRAMES = 4  # 在安全区停留的帧数才认为归位（越小越容易解锁）
 
 # OneEuroFilter 参数 (优化：更平滑的光标移动)
 ONEEURO_MIN_CUTOFF = 1.0   # 恢复为 1.0 以提高响应速度
@@ -74,7 +85,7 @@ ONEEURO_BETA = 0.007       # 恢复为 0.007 以提高响应速度
 ONEEURO_DCUTOFF = 1.0      # 速度平滑截止频率
 
 # 状态机迟滞参数
-GESTURE_CONFIRM_FRAMES = 3  # 减少确认帧数，更快响应 (was 5)
+GESTURE_CONFIRM_FRAMES = 5  # 建议使用更长窗口 + 多数投票，提高稳定性
 
 # --- 🏷️ 状态常量定义 ---
 MODE_NONE = 0
@@ -96,50 +107,58 @@ class PPTController:
     """
     def __init__(self):
         self.app = None
-        self.slide_show = None
-        self.slide_show_view = None
         self.last_slide_index = -1
         
         if COM_AVAILABLE:
             try:
+                # 获取现有的 PPT 实例
                 self.app = win32com.client.GetActiveObject("PowerPoint.Application")
-                # 获取当前演示文稿的幻灯片放映
-                if self.app.Presentations.Count > 0:
-                    pres = self.app.ActivePresentation
-                    if pres.SlideShowWindow:
-                        self.slide_show = pres.SlideShowWindow
-                        self.slide_show_view = self.slide_show.View
-                        self.last_slide_index = self.slide_show_view.CurrentSlide.SlideIndex
-                        print("COM接口初始化成功")
+                print("COM接口初始化成功 (动态模式)")
             except Exception as e:
                 print(f"COM初始化失败: {e}，将使用模拟按键")
                 self.app = None
     
+    @property
+    def active_view(self):
+        """动态获取当前的放映视图，防止对象失效"""
+        if not self.app:
+            return None
+        try:
+            # 必须动态获取，不能缓存！
+            if self.app.SlideShowWindows.Count > 0:
+                # 获取当前活跃的放映窗口
+                return self.app.SlideShowWindows(1).View
+        except Exception:
+            # 尝试重新连接 app
+            self.reconnect()
+        return None
+
     def set_pointer_type(self, pointer_type):
         """
         设置PPT指针类型（确定性）
-        pointer_type: 1=箭头, 2=画笔, 5=橡皮
+        pointer_type: 1=箭头, 2=画笔, 3=激光笔, 5=橡皮
         """
-        if self.slide_show_view:
+        view = self.active_view
+        if view:
             try:
-                self.slide_show_view.PointerType = pointer_type
+                view.PointerType = pointer_type
                 return True
             except Exception as e:
-                print(f"设置指针类型失败: {e}")
-                return False
+                # 某些时候设置失败是正常的（如切换瞬间），不打印刷屏日志
+                pass
         return False
     
     def check_slide_changed(self):
         """
         检测是否翻页，如果翻页则返回True并自动切笔
-        这是实现"翻页后自动切笔"的核心功能
         """
-        if self.slide_show_view:
+        view = self.active_view
+        if view:
             try:
-                current_index = self.slide_show_view.CurrentSlide.SlideIndex
+                current_index = view.CurrentSlide.SlideIndex
                 if current_index != self.last_slide_index:
                     self.last_slide_index = current_index
-                    # 翻页后自动切笔（用户核心需求）
+                    # 翻页后自动切笔
                     self.set_pointer_type(2)  # 画笔
                     return True
             except Exception:
@@ -147,20 +166,47 @@ class PPTController:
         return False
     
     def reconnect(self):
-        """尝试重新连接PPT"""
+        """尝试重新连接PPT应用"""
         if COM_AVAILABLE:
             try:
                 self.app = win32com.client.GetActiveObject("PowerPoint.Application")
-                if self.app.Presentations.Count > 0:
-                    pres = self.app.ActivePresentation
-                    if pres.SlideShowWindow:
-                        self.slide_show = pres.SlideShowWindow
-                        self.slide_show_view = self.slide_show.View
-                        self.last_slide_index = self.slide_show_view.CurrentSlide.SlideIndex
-                        return True
+                return True
             except Exception:
                 pass
         return False
+
+    def draw_line(self, x1: int, y1: int, x2: int, y2: int) -> bool:
+        """
+        使用 COM 接口在 PPT 放映窗口直接画线
+        """
+        view = self.active_view
+        if view:
+            try:
+                # 强制确保是画笔模式
+                if view.PointerType != 2:
+                    view.PointerType = 2
+                
+                # DrawLine(BeginX, BeginY, EndX, EndY)
+                view.DrawLine(int(x1), int(y1), int(x2), int(y2))
+                return True
+            except Exception:
+                pass
+        return False
+
+    def erase_drawing(self) -> bool:
+        """清除当前幻灯片的所有墨迹"""
+        view = self.active_view
+        if view:
+            try:
+                view.EraseDrawing()
+                return True
+            except Exception:
+                pass
+        return False
+
+    def is_slideshow_active(self) -> bool:
+        """检查 PPT 是否在放映模式"""
+        return self.active_view is not None
 
 
 class OneEuroFilter:
@@ -224,7 +270,22 @@ class OneEuroFilter:
 
 
 class PPTGestureController:
-    def __init__(self, external_mp=False, cursor_mapper=None):
+    def __init__(
+        self,
+        external_mp: bool = False,
+        cursor_mapper=None,
+        confirm_delay: float = CONFIRM_DELAY,
+        gesture_confirm_frames: int = GESTURE_CONFIRM_FRAMES,
+        swipe_threshold: float = SWIPE_THRESHOLD,
+        swipe_velocity_threshold: float = SWIPE_VELOCITY_THRESHOLD,
+        swipe_cooldown: float = SWIPE_COOLDOWN,
+        neutral_stay_frames: int = NEUTRAL_STAY_FRAMES,
+        pinch_trigger_threshold: float = 0.33,
+        pinch_release_threshold: float = 0.65,
+        auto_pen_on_pinch: bool = True,
+        auto_pen_on_slide_change: bool = True,
+        debug_overlay: bool = True,
+    ):
         # 1. 初始化 MediaPipe
         self.external_mp = external_mp
         self.mp_hands = mp.solutions.hands
@@ -245,6 +306,19 @@ class PPTGestureController:
         self.last_gesture = MODE_NONE
         self.gesture_timer = 0
         self.last_time = time.time()
+        self.confirm_delay = float(confirm_delay)
+
+        # 行为/阈值参数（可由 main.py / config.py 注入）
+        self.gesture_confirm_frames = max(3, int(gesture_confirm_frames))
+        self.swipe_threshold = float(swipe_threshold)
+        self.swipe_velocity_threshold = float(swipe_velocity_threshold)
+        self.swipe_cooldown = float(swipe_cooldown)
+        self.neutral_stay_frames = max(1, int(neutral_stay_frames))
+        self.pinch_trigger_threshold = float(pinch_trigger_threshold)
+        self.pinch_release_threshold = float(pinch_release_threshold)
+        self.auto_pen_on_pinch = bool(auto_pen_on_pinch)
+        self.auto_pen_on_slide_change = bool(auto_pen_on_slide_change)
+        self.debug_overlay = bool(debug_overlay)
 
         # 3. 平滑算法变量
         self.prev_x, self.prev_y = 0, 0
@@ -256,25 +330,30 @@ class PPTGestureController:
         # 5. 状态机变量（空间复位逻辑）
         self.nav_state = STATE_IDLE
         self.neutral_stay_count = 0
+        self._last_nav_eval_time = time.time()
+        self.last_nav_delta_x_norm = 0.0
+        self.last_nav_velocity_norm_s = 0.0
+        self.last_in_neutral_zone = False
         
         # 6. PPT控制器（COM接口）
         self.ppt_controller = PPTController()
 
         # 7. 高级坐标映射器 (与绘图模式一致)
         if cursor_mapper:
-             self.cursor_mapper = cursor_mapper
+            self.cursor_mapper = cursor_mapper
         else:
-             # 如果没有注入，使用默认全屏区域
+            # 如果没有注入，使用默认全屏区域
             self.cursor_mapper = CoordinateMapper(
                 (SCREEN_WIDTH, SCREEN_HEIGHT),
                 (0.0, 0.0, 1.0, 1.0),
                 smoothing_factor=0.15  # 与主程序绘图光标平滑度一致
             )
 
-        # 5. 鼠标状态追踪
+        # 鼠标状态追踪
         self.mouse_down = False
+        self.prev_is_pinching = False
         
-        # 6. OneEuroFilter: 为21个关键点的x, y, z坐标创建滤波器
+        # OneEuroFilter: 为21个关键点的x, y, z坐标创建滤波器
         self.landmark_filters = {}
         for i in range(21):
             for coord in ['x', 'y', 'z']:
@@ -284,8 +363,8 @@ class PPTGestureController:
                     dcutoff=ONEEURO_DCUTOFF
                 )
         
-        # 7. 状态机迟滞：连续帧确认机制
-        self.gesture_history = deque(maxlen=GESTURE_CONFIRM_FRAMES)
+        # 状态机迟滞：滑动窗口确认机制（多数投票）
+        self.gesture_history = deque(maxlen=self.gesture_confirm_frames)
         self.confirmed_gesture = MODE_NONE
         
         # 调试变量
@@ -296,6 +375,57 @@ class PPTGestureController:
         
         # 捏合释放时间记录 (防止写字结束后立即切模式)
         self.last_pinch_release_time = 0.0
+
+        # 透明叠加层（当 COM 画线不可用时的备选方案）
+        self.overlay = None
+        self.use_overlay = False  # 是否使用透明叠加层模式
+        self._overlay_initialized = False
+
+        # 手指状态迟滞（减少“角度阈值抖动”）
+        # index/middle/ring/pinky: 1/2/3/4
+        self._finger_extended_state = {1: False, 2: False, 3: False, 4: False}
+        self._thumb_open_state = False
+
+    def _majority_vote_gesture(self):
+        """多数投票确认：避免“全一致才确认”导致模式永远不稳定。"""
+        if not self.gesture_history:
+            return MODE_NONE
+        counts = Counter(self.gesture_history)
+        gesture, top_count = counts.most_common(1)[0]
+        # 过滤 NONE：避免没手/抖动把确认手势冲掉
+        if gesture == MODE_NONE:
+            return MODE_NONE
+        ratio = top_count / max(1, len(self.gesture_history))
+        return gesture if ratio >= 0.6 else MODE_NONE
+
+    def _thumb_open_hysteresis(self, ratio: float) -> bool:
+        """
+        拇指开合迟滞：
+        - open:  ratio > 0.65
+        - close: ratio < 0.55
+        """
+        if self._thumb_open_state:
+            if ratio < 0.55:
+                self._thumb_open_state = False
+        else:
+            if ratio > 0.65:
+                self._thumb_open_state = True
+        return self._thumb_open_state
+
+    def _finger_extended_hysteresis(self, finger_id: int, angle_deg: float, tip_pip_dist: float) -> bool:
+        """
+        角度 + 距离的迟滞判定：
+        - 伸直进入：angle < 35 且 tip-pip 距离足够（避免远距离噪声）
+        - 伸直保持：angle < 50 且 tip-pip 距离足够
+        """
+        dist_ok = tip_pip_dist >= FINGER_EXTEND_DISTANCE_THRESHOLD
+        prev = self._finger_extended_state.get(finger_id, False)
+        if prev:
+            extended = dist_ok and (angle_deg < 50.0)
+        else:
+            extended = dist_ok and (angle_deg < 35.0)
+        self._finger_extended_state[finger_id] = extended
+        return extended
 
     def get_distance(self, p1, p2):
         """计算两点欧几里得距离"""
@@ -352,18 +482,24 @@ class PPTGestureController:
         detected_gesture = self.recognize_gesture(filtered_landmarks, h, w)
 
         # --- 🔵 模块二: 状态机 (带时间缓冲的模式切换) ---
-        # 状态机迟滞：连续N帧确认才更新状态
+        # 滑动窗口多数投票确认：更抗抖动
         self.gesture_history.append(detected_gesture)
-        if len(self.gesture_history) == GESTURE_CONFIRM_FRAMES:
-            # 检查是否所有帧都是同一手势
-            if len(set(self.gesture_history)) == 1:
-                self.confirmed_gesture = detected_gesture
-            # 如果历史记录满了但手势不一致，清空重新开始
-            elif len(set(self.gesture_history)) > 1:
-                self.gesture_history.clear()
+        voted = self._majority_vote_gesture()
+        if voted != MODE_NONE:
+            self.confirmed_gesture = voted
         
         # 注意: 如果正在捏合(写字中)，则锁定模式切换
         is_pinching = self.check_pinch(filtered_landmarks, h, w)
+
+        # 捏合沿检测（用于自动切笔/调试）
+        pinch_start = is_pinching and (not self.prev_is_pinching)
+        pinch_end = (not is_pinching) and self.prev_is_pinching
+        self.prev_is_pinching = is_pinching
+
+        # 关键修复：如果当前在 NAV（翻页）但用户开始捏合，自动切到 PEN，避免“写不上去”
+        if pinch_start and self.auto_pen_on_pinch and self.current_mode == MODE_NAV:
+            self.current_mode = MODE_PEN
+            self.trigger_mode_switch_shortcut()
 
         if not is_pinching:
             # 使用确认的手势进行模式切换
@@ -386,6 +522,14 @@ class PPTGestureController:
                 self.mouse_down = False
             except Exception:
                 pass
+            # 如果使用叠加层，结束笔画
+            if self.use_overlay and self.overlay:
+                self.overlay.end_stroke()
+        
+        # 【关键】手离开时隐藏光标，防止绿色十字残留
+        if self.use_overlay and self.overlay:
+            self.overlay.hide_cursor()
+        
         # 重置手势历史
         self.gesture_history.clear()
         self.confirmed_gesture = MODE_NONE
@@ -393,6 +537,12 @@ class PPTGestureController:
         if self.nav_state != STATE_IDLE:
             self.nav_state = STATE_IDLE
             self.neutral_stay_count = 0
+        self.prev_is_pinching = False
+        self._last_nav_eval_time = time.time()
+        # 重置迟滞状态
+        for k in self._finger_extended_state:
+            self._finger_extended_state[k] = False
+        self._thumb_open_state = False
 
     def _draw_ui(self, frame, detected_gesture, is_pinching, landmarks, w, h):
         """绘制UI状态"""
@@ -423,6 +573,66 @@ class PPTGestureController:
             frame, f"Pinch Ratio: {self.last_pinch_ratio:.3f}", (10, 230),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, pinch_color, 2
         )
+
+        if self.debug_overlay:
+            # NAV 调试信息：看一眼就知道“为什么不翻页”
+            nav_state_name = {
+                STATE_IDLE: "IDLE",
+                STATE_SWIPE: "SWIPE",
+                STATE_COOLDOWN: "COOLDOWN",
+                STATE_WAIT_NEUTRAL: "WAIT_NEUTRAL",
+            }.get(self.nav_state, "UNKNOWN")
+            cv2.putText(
+                frame,
+                f"NAV: {nav_state_name} dx={self.last_nav_delta_x_norm:.3f} v={self.last_nav_velocity_norm_s:.2f} neutral={int(self.last_in_neutral_zone)}",
+                (10, 260),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (200, 200, 200),
+                2,
+            )
+            cv2.putText(
+                frame,
+                "Keys: i=Pen  e=Eraser  n=Nav",
+                (10, 290),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (200, 200, 200),
+                2,
+            )
+            com_ok = self.ppt_controller.active_view is not None
+            overlay_on = self.use_overlay
+            draw_method = "OVERLAY" if overlay_on else ("COM" if com_ok else "pyautogui")
+            cv2.putText(
+                frame,
+                f"Draw: {draw_method}  MouseDown: {int(self.mouse_down)}  pts: {len(self.point_history)}",
+                (10, 320),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 0) if (overlay_on or com_ok) else (0, 165, 255),
+                2,
+            )
+            # 提示：按 O 开启叠加层
+            if not com_ok and not overlay_on:
+                cv2.putText(
+                    frame,
+                    "Press 'O' to enable overlay drawing on PPT",
+                    (10, 350),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 200, 255),
+                    2,
+                )
+            elif overlay_on:
+                cv2.putText(
+                    frame,
+                    "OVERLAY mode: drawing above PPT (press X to clear, O to disable)",
+                    (10, 350),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 100),
+                    2,
+                )
         
         # 显示三指捏合状态和距离信息
         if is_pinching:
@@ -511,12 +721,12 @@ class PPTGestureController:
             thumb_tip.y - pinky_mcp.y
         )
         
-        # 归一化比对：如果距离小于手掌宽度的60%，认为拇指闭合
+        # 归一化比对：用比率适配远近变化
         if palm_width < 1e-6:
             return False
         
         ratio = thumb_to_pinky / palm_width
-        return ratio > 0.6  # 张开阈值
+        return self._thumb_open_hysteresis(ratio)
 
     def recognize_gesture(self, landmarks, h, w):
         """
@@ -541,21 +751,20 @@ class PPTGestureController:
         
         finger_states = []
 
-        # 检测拇指（使用距离比对法）
+        # 检测拇指（迟滞）
         thumb_open = self.check_thumb_state(landmarks)
         finger_states.append(1 if thumb_open else 0)
 
-        # 检测其他四指（使用向量角度法）
-        for tip_idx, pip_idx, mcp_idx in finger_configs:
+        # 检测其他四指（角度 + 距离 + 迟滞）
+        for idx_in_list, (tip_idx, pip_idx, mcp_idx) in enumerate(finger_configs, start=1):
             tip = landmarks[tip_idx]
             pip = landmarks[pip_idx]
             mcp = landmarks[mcp_idx]
-            
+
             angle = self.calculate_finger_angle(mcp, pip, tip)
-            
-            # 角度 < 30度 认为伸直，> 90度 认为弯曲
-            # 考虑到测量噪声，放宽至30度
-            is_extended = angle < 30.0
+            tip_pip_dist = math.hypot(tip.x - pip.x, tip.y - pip.y)
+
+            is_extended = self._finger_extended_hysteresis(idx_in_list, angle, tip_pip_dist)
             finger_states.append(1 if is_extended else 0)
 
         # fingers = [拇指, 食指, 中指, 无名指, 小指]
@@ -591,7 +800,7 @@ class PPTGestureController:
 
         if detected_gesture != MODE_NONE and detected_gesture == self.last_gesture:
             self.gesture_timer += dt
-            if self.gesture_timer >= CONFIRM_DELAY:
+            if self.gesture_timer >= self.confirm_delay:
                 if self.current_mode != detected_gesture:
                     self.current_mode = detected_gesture
                     self.trigger_mode_switch_shortcut()
@@ -606,38 +815,74 @@ class PPTGestureController:
         根据新模式设置PPT工具（使用COM接口，确定性状态管理）
         如果COM不可用，降级使用模拟按键
         """
-        print(f"切换模式到: {self.get_mode_name()}")
+        # 减少日志刷屏：只在非叠加层模式下打印
+        if not self.use_overlay:
+            print(f"切换模式到: {self.get_mode_name()}")
+        
+        # 如果使用透明叠加层，不需要切换 PPT 指针类型
+        if self.use_overlay:
+            return
         
         # 优先使用COM接口（确定性）
         if COM_AVAILABLE:
-            # 如果COM连接丢失，尝试重连
-            if not self.ppt_controller.slide_show_view:
-                self.ppt_controller.reconnect()
-            
-            if self.ppt_controller.slide_show_view:
+            # 使用 active_view 属性动态获取视图
+            view = self.ppt_controller.active_view
+            if view:
                 if self.current_mode == MODE_PEN:
                     if self.ppt_controller.set_pointer_type(2):  # 画笔
-                        print("已通过COM接口切换到画笔模式")
                         return
                 elif self.current_mode == MODE_ERASER:
                     if self.ppt_controller.set_pointer_type(5):  # 橡皮
-                        print("已通过COM接口切换到橡皮模式")
                         return
                 elif self.current_mode == MODE_NAV:
-                    if self.ppt_controller.set_pointer_type(3):  # 激光笔 (PointerType=3)
-                        print("已通过COM接口切换到激光笔模式")
+                    if self.ppt_controller.set_pointer_type(3):  # 激光笔
                         return
         
-        # 降级方案：使用模拟按键
+        # 降级方案：使用模拟按键（静默执行）
         try:
             if self.current_mode == MODE_PEN:
                 pyautogui.hotkey('ctrl', 'p')
             elif self.current_mode == MODE_ERASER:
                 pyautogui.hotkey('ctrl', 'e')
             elif self.current_mode == MODE_NAV:
-                pyautogui.hotkey('ctrl', 'l')  # 激光笔快捷键
-        except Exception as e:
-            print(f"快捷键执行失败: {e}")
+                pyautogui.hotkey('ctrl', 'l')
+        except Exception:
+            pass
+
+    def toggle_overlay_mode(self):
+        """
+        切换透明叠加层模式（按 'o' 键触发）
+        当 COM 画线不可用时，用这个方案在 PPT 上方画画
+        """
+        if not OVERLAY_AVAILABLE:
+            print("透明叠加层不可用，请检查 modules/transparent_overlay.py")
+            return False
+        
+        self.use_overlay = not self.use_overlay
+        
+        if self.use_overlay:
+            # 启动叠加层
+            if not self._overlay_initialized:
+                self.overlay = get_overlay()
+                self.overlay.start()
+                self._overlay_initialized = True
+                print("透明叠加层已启动 - 现在可以在 PPT 上方画画了")
+            else:
+                self.overlay.set_visible(True)
+                print("透明叠加层已显示")
+        else:
+            # 隐藏叠加层（但不销毁）
+            if self.overlay:
+                self.overlay.set_visible(False)
+                print("透明叠加层已隐藏")
+        
+        return self.use_overlay
+
+    def clear_overlay(self):
+        """清除透明叠加层上的所有笔迹（按 'x' 键触发）"""
+        if self.overlay:
+            self.overlay.clear()
+            print("透明叠加层已清空")
 
     def check_pinch(self, landmarks, h, w):
         """
@@ -678,11 +923,9 @@ class PPTGestureController:
         # 调试信息：将捏合比率存入实例变量供UI显示
         self.last_pinch_ratio = pinch_ratio
         
-        # 迟滞阈值设置 (与主画布对齐)
-        # 更宽松的触发阈值，更容易开始写字
-        # 更大的迟滞区间，减少断笔
-        PINCH_TRIGGER_THRESHOLD = 0.35   # 更宽松 (was 0.28)
-        PINCH_RELEASE_THRESHOLD = 0.55   # 更大迟滞 (was 0.50)
+        # 迟滞阈值设置（可注入，默认更抗抖，减少“点一下不成线/断断续续”）
+        PINCH_TRIGGER_THRESHOLD = self.pinch_trigger_threshold
+        PINCH_RELEASE_THRESHOLD = self.pinch_release_threshold
 
         # 状态机逻辑
         if self.mouse_down:
@@ -720,83 +963,90 @@ class PPTGestureController:
         # 传入归一化坐标 (0-1)，返回屏幕坐标 (0-W, 0-H)
         curr_x, curr_y = self.cursor_mapper.map((center_x, center_y))
 
+        # 关键兜底：只要检测到捏合，就强制进入可书写模式并确保PPT指针也切到笔
+        # 避免模式短时不稳定时仍停留在 NAV/激光，导致“只能出红点/写不上去线”
+        if is_pinching and self.auto_pen_on_pinch and self.current_mode == MODE_NAV:
+            self.current_mode = MODE_PEN
+            self.trigger_mode_switch_shortcut()
+
+        # ★ 如果使用透明叠加层，始终更新光标位置（让用户知道笔在哪）
+        if self.use_overlay and self.overlay:
+            is_eraser_mode = (self.current_mode == MODE_ERASER)
+            self.overlay.update_cursor(
+                int(curr_x), int(curr_y),
+                is_drawing=is_pinching and not is_eraser_mode,
+                is_erasing=is_pinching and is_eraser_mode
+            )
+
         # 3. 分模式执行
         if self.current_mode == MODE_PEN or self.current_mode == MODE_ERASER:
-            # 只有捏合时才按下鼠标写字/擦除
+            # 只有捏合时才画线/擦除
             if is_pinching:
                 if not self.mouse_down:
-                    # 开始捏合，按下鼠标
-                    try:
-                        pyautogui.mouseDown()
-                        self.mouse_down = True
-                        self.point_history.clear()  # 重置历史
-                    except Exception:
-                        pass
-                
-                # 更新历史点
-                self.point_history.append((curr_x, curr_y))
-                
-                # 持续捏合，执行预测性样条平滑移动
-                try:
-                    move_points = []
+                    # 开始捏合
+                    self.mouse_down = True
+                    self.point_history.clear()
+                    # 记录起点
+                    self.point_history.append((curr_x, curr_y))
                     
-                    if len(self.point_history) >= 3:
-                        # 预测性样条插值：使用历史3点 + 预测第4点
-                        # 这样可以生成从 prev(p1) 到 curr(p2) 的平滑曲线
-                        p0 = self.point_history[-3]
+                    # 如果使用透明叠加层，开始笔画
+                    if self.use_overlay and self.overlay:
+                        if self.current_mode == MODE_PEN:
+                            self.overlay.set_pen_color("#FF0000")  # 红色
+                            self.overlay.start_stroke(int(curr_x), int(curr_y))
+                        # 橡皮擦模式不需要 start_stroke，直接擦
+                else:
+                    # 更新历史点
+                    self.point_history.append((curr_x, curr_y))
+                
+                    # 画线/擦除
+                    if len(self.point_history) >= 2:
                         p1 = self.point_history[-2]
                         p2 = self.point_history[-1]
                         
-                        # 简单的线性预测：p3 = p2 + (p2 - p1)
-                        # 这模拟了惯性，为 Catmull-Rom 提供未来的控制点
-                        p3_x = p2[0] + (p2[0] - p1[0])
-                        p3_y = p2[1] + (p2[1] - p1[1])
-                        p3 = (int(p3_x), int(p3_y))
-                        
-                        # 生成 p1 -> p2 的平滑曲线
-                        # num_points=8 对应约 240Hz 的模拟鼠标回报率 (30fps * 8)
-                        move_points = catmull_rom_spline(p0, p1, p2, p3, num_points=8)
-                        
-                    elif len(self.point_history) == 2:
-                        # 只有两点，线性插值
-                        p_start = self.point_history[-2]
-                        p_end = self.point_history[-1]
-                        steps = 8
-                        for i in range(1, steps + 1):
-                            t = i / steps
-                            mx = int(p_start[0] + (p_end[0] - p_start[0]) * t)
-                            my = int(p_start[1] + (p_end[1] - p_start[1]) * t)
-                            move_points.append((mx, my))
-                    else:
-                        # 只有一点，直接移动
-                        move_points.append((curr_x, curr_y))
-
-                    # 执行移动序列
-                    for pt in move_points:
-                        pyautogui.moveTo(pt[0], pt[1], duration=0)
-                    
-                    # 确保最后停在目标点
-                    pyautogui.moveTo(curr_x, curr_y, duration=0)
-                    
-                except Exception:
-                    pass
+                        # 方案1：透明叠加层（用户主动开启，最可靠）
+                        if self.use_overlay and self.overlay:
+                            if self.current_mode == MODE_PEN:
+                                self.overlay.draw_to(int(p2[0]), int(p2[1]))
+                            else:  # MODE_ERASER - 橡皮擦
+                                self.overlay.erase_at(int(p2[0]), int(p2[1]), radius=35)
+                        else:
+                            # 方案2：COM 直接画线（PPT 放映模式）
+                            com_ok = self.ppt_controller.draw_line(p1[0], p1[1], p2[0], p2[1])
+                            
+                            if not com_ok:
+                                # 方案3：pyautogui 模拟拖拽（兜底）
+                                try:
+                                    if len(self.point_history) == 2:
+                                        pyautogui.moveTo(p1[0], p1[1], duration=0)
+                                        pyautogui.mouseDown(button='left')
+                                    pyautogui.moveTo(p2[0], p2[1], duration=0)
+                                except Exception:
+                                    pass
             else:
                 if self.mouse_down:
-                    # 结束捏合，释放鼠标
-                    try:
-                        pyautogui.mouseUp()
-                        self.mouse_down = False
-                        self.point_history.clear()
-                        # 记录释放时间，启动模式切换冷却锁
-                        self.last_pinch_release_time = time.time()
-                    except Exception:
-                        pass
+                    # 结束捏合
+                    self.mouse_down = False
+                    self.point_history.clear()
+                    # 记录释放时间，启动模式切换冷却锁
+                    self.last_pinch_release_time = time.time()
+                    
+                    # 如果使用透明叠加层，结束笔画
+                    if self.use_overlay and self.overlay:
+                        self.overlay.end_stroke()
+                    else:
+                        # pyautogui 模式需要 mouseUp
+                        try:
+                            pyautogui.mouseUp(button='left')
+                        except Exception:
+                            pass
                 
                 # 未捏合时仅移动光标 (不需要高级平滑，线性跟随即可)
-                try:
-                    pyautogui.moveTo(curr_x, curr_y, duration=0)
-                except Exception:
-                    pass
+                if not self.use_overlay:
+                    try:
+                        pyautogui.moveTo(curr_x, curr_y, duration=0)
+                    except Exception:
+                        pass
 
         elif self.current_mode == MODE_NAV:
             # 挥手翻页逻辑（NAV模式下不控制光标）
@@ -806,20 +1056,31 @@ class PPTGestureController:
             # 检查是否翻页（COM接口）- 实现"翻页后自动切笔"
             if self.ppt_controller.check_slide_changed():
                 print("检测到翻页，已自动切换为画笔模式")
+                # 关键修复：PPT 指针切到笔还不够，内部模式也要切到 PEN，否则“写不上去”
+                if self.auto_pen_on_slide_change:
+                    self.current_mode = MODE_PEN
+                    self.trigger_mode_switch_shortcut()
+                    return
             
             current_time = time.time()
+            dt_nav = max(1e-3, current_time - self._last_nav_eval_time)
+            self._last_nav_eval_time = current_time
             delta_x_norm = center_x - self.prev_hand_x_norm
+            velocity_norm_s = delta_x_norm / dt_nav
+            self.last_nav_delta_x_norm = float(delta_x_norm)
+            self.last_nav_velocity_norm_s = float(velocity_norm_s)
             
             # 检查手部是否在安全区（归一化坐标）
             in_neutral_zone = (NEUTRAL_ZONE_X_MIN <= center_x <= NEUTRAL_ZONE_X_MAX and
                               NEUTRAL_ZONE_Y_MIN <= center_y <= NEUTRAL_ZONE_Y_MAX)
+            self.last_in_neutral_zone = bool(in_neutral_zone)
             
             # 状态机逻辑：实现空间复位机制
             if self.nav_state == STATE_IDLE:
                 # 空闲状态：检测挥手
-                if (current_time - self.last_swipe_time) > SWIPE_COOLDOWN:
-                    if abs(delta_x_norm) > SWIPE_THRESHOLD:
-                        if delta_x_norm > SWIPE_THRESHOLD:
+                if (current_time - self.last_swipe_time) > self.swipe_cooldown:
+                    if abs(delta_x_norm) > self.swipe_threshold and abs(velocity_norm_s) > self.swipe_velocity_threshold:
+                        if delta_x_norm > self.swipe_threshold:
                             # 向右挥手 -> 上一页
                             try:
                                 pyautogui.press('left')
@@ -830,7 +1091,7 @@ class PPTGestureController:
                                 self.prev_hand_x_norm = center_x
                             except Exception:
                                 pass
-                        elif delta_x_norm < -SWIPE_THRESHOLD:
+                        elif delta_x_norm < -self.swipe_threshold:
                             # 向左挥手 -> 下一页
                             try:
                                 pyautogui.press('right')
@@ -853,7 +1114,7 @@ class PPTGestureController:
                 # 这是解决"回位反向操作"的核心机制
                 if in_neutral_zone:
                     self.neutral_stay_count += 1
-                    if self.neutral_stay_count >= NEUTRAL_STAY_FRAMES:
+                    if self.neutral_stay_count >= self.neutral_stay_frames:
                         # 已归位，重置状态
                         self.nav_state = STATE_IDLE
                         self.neutral_stay_count = 0

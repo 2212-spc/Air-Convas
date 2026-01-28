@@ -75,6 +75,27 @@ PINCH_RELEASE_CONFIRM_FRAMES = 4    # 增加到4：强力过滤抖动导致的�
 # 速度感知捏合参数（新增）
 PINCH_VELOCITY_BOOST = 0.02         # 快速捏合时的阈值增益
 
+# ==================== PPT 模式手势参数（新增）====================
+# 说明：
+# - PPT 模式里翻页/写字由 `modules/ppt_gesture_controller.py` 负责
+# - 这里的阈值用于让翻页更容易触发、模式更稳定
+PPT_CONFIRM_DELAY = 0.25                 # 模式切换确认时间（秒）
+PPT_GESTURE_CONFIRM_FRAMES = 5           # 手势确认窗口帧数（配合“多数投票”更稳定）
+
+# 翻页挥手：归一化位移阈值（0~1，越小越容易翻页）
+PPT_SWIPE_THRESHOLD = 0.18
+# 翻页挥手：归一化速度阈值（单位：归一化坐标/秒，越小越容易触发）
+PPT_SWIPE_VELOCITY_THRESHOLD = 0.9
+PPT_SWIPE_COOLDOWN = 0.35                # 翻页冷却（秒）
+
+# 归位判定：回到安全区需要连续多少帧（越小越容易“解锁”下一次翻页）
+PPT_NEUTRAL_STAY_FRAMES = 4
+
+# 捏合写字：迟滞阈值（pinch_ratio 越小表示捏得越紧）
+# 如果你出现“只能点不成线/断断续续”，优先把 RELEASE 调大（更不容易松手）
+PPT_PINCH_TRIGGER_THRESHOLD = 0.33
+PPT_PINCH_RELEASE_THRESHOLD = 0.65
+
 # ==================== 绘图工具参数 ====================
 # Pen / eraser
 PEN_COLOR = (0, 255, 255)  # BGR yellow
