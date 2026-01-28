@@ -12,6 +12,7 @@ import math
 import numpy as np
 from collections import deque
 from core.coordinate_mapper import CoordinateMapper
+from utils.smoothing import catmull_rom_spline
 
 # COM接口支持
 try:
@@ -36,6 +37,10 @@ SMOOTHING_FACTOR = 0.7
 
 # 模式切换确认时间 (秒)
 CONFIRM_DELAY = 0.3  # 减少到300ms，更快响应 (was 1.0)
+
+# 书写后模式锁定冷却时间 (秒)
+# 在写字(捏合)结束后的这段时间内，禁止切换模式，防止误触
+PINCH_MODE_LOCK_COOLDOWN = 0.6
 
 # 手指伸直检测容差 (归一化坐标，0.0~1.0)
 # 允许指尖稍微在关节下方，仍然判定为伸直
@@ -64,8 +69,8 @@ NEUTRAL_ZONE_Y_MAX = 1
 NEUTRAL_STAY_FRAMES = 10  # 在安全区停留的帧数才认为归位
 
 # OneEuroFilter 参数 (优化：更平滑的光标移动)
-ONEEURO_MIN_CUTOFF = 0.8   # 降低：更强的低速平滑 (was 1.0)
-ONEEURO_BETA = 0.005       # 降低：减少高速抖动 (was 0.007)
+ONEEURO_MIN_CUTOFF = 1.0   # 恢复为 1.0 以提高响应速度
+ONEEURO_BETA = 0.007       # 恢复为 0.007 以提高响应速度
 ONEEURO_DCUTOFF = 1.0      # 速度平滑截止频率
 
 # 状态机迟滞参数
@@ -285,6 +290,12 @@ class PPTGestureController:
         
         # 调试变量
         self.last_pinch_ratio = 0.0
+        
+        # 绘图轨迹平滑历史 (用于 Catmull-Rom Spline)
+        self.point_history = deque(maxlen=3)
+        
+        # 捏合释放时间记录 (防止写字结束后立即切模式)
+        self.last_pinch_release_time = 0.0
 
     def get_distance(self, p1, p2):
         """计算两点欧几里得距离"""
@@ -571,6 +582,13 @@ class PPTGestureController:
 
     def update_mode(self, detected_gesture, dt):
         """状态机逻辑: 防误触的时间积累"""
+        
+        # 冷却锁检查：如果刚刚结束写字(捏合)，禁止切换模式
+        # 防止手指松开瞬间的形变被误判为其他手势
+        if (time.time() - self.last_pinch_release_time) < PINCH_MODE_LOCK_COOLDOWN:
+            self.gesture_timer = 0
+            return
+
         if detected_gesture != MODE_NONE and detected_gesture == self.last_gesture:
             self.gesture_timer += dt
             if self.gesture_timer >= CONFIRM_DELAY:
@@ -623,14 +641,15 @@ class PPTGestureController:
 
     def check_pinch(self, landmarks, h, w):
         """
-        简化版捏合检测：只检测拇指与食指的距离
-        引入迟滞逻辑 (Hysteresis) 防止状态抖动
+        增强版捏合检测：检测拇指与食指 OR 中指的距离
+        支持三指书写习惯
         """
         # 获取指尖坐标
         # landmarks 可能是原始MediaPipe对象或滤波后的列表
         try:
             thumb = landmarks[4]   # 拇指尖
             index = landmarks[8]    # 食指尖
+            middle = landmarks[12]  # 中指尖
             # 辅助点用于计算手掌尺度
             index_mcp = landmarks[5]   # 食指MCP
             pinky_mcp = landmarks[17]  # 小指MCP
@@ -643,11 +662,18 @@ class PPTGestureController:
         if palm_width < 1e-6:
             return False
 
-        # 计算拇指-食指距离 (归一化坐标)
+        # 计算 拇指-食指 距离 (归一化坐标)
         dist_thumb_index = math.hypot(thumb.x - index.x, thumb.y - index.y)
         
+        # 计算 拇指-中指 距离 (新增)
+        dist_thumb_middle = math.hypot(thumb.x - middle.x, thumb.y - middle.y)
+        
+        # 取两者中较小的距离作为判定依据
+        # 只要食指或中指任意一个靠近拇指，都算捏合
+        min_dist = min(dist_thumb_index, dist_thumb_middle)
+        
         # 计算捏合比例
-        pinch_ratio = dist_thumb_index / palm_width
+        pinch_ratio = min_dist / palm_width
         
         # 调试信息：将捏合比率存入实例变量供UI显示
         self.last_pinch_ratio = pinch_ratio
@@ -694,19 +720,6 @@ class PPTGestureController:
         # 传入归一化坐标 (0-1)，返回屏幕坐标 (0-W, 0-H)
         curr_x, curr_y = self.cursor_mapper.map((center_x, center_y))
 
-        # --- 子帧插值平滑逻辑 ---
-        # 即使使用了平滑器，直接跳到 curr_x, curr_y 也可能在 30fps 下显卡顿
-        # 我们在两帧之间生成中间点，模拟高频鼠标事件
-        INTERPOLATION_STEPS = 4  # 增加插值点数量，更平滑 (was 2)
-        
-        # 获取上一次的位置 (如果这是第一帧，就用当前位置)
-        start_x, start_y = self.prev_x, self.prev_y
-        if start_x == 0 and start_y == 0:
-            start_x, start_y = curr_x, curr_y
-
-        # 更新历史位置供下一帧使用
-        self.prev_x, self.prev_y = curr_x, curr_y
-
         # 3. 分模式执行
         if self.current_mode == MODE_PEN or self.current_mode == MODE_ERASER:
             # 只有捏合时才按下鼠标写字/擦除
@@ -716,21 +729,55 @@ class PPTGestureController:
                     try:
                         pyautogui.mouseDown()
                         self.mouse_down = True
+                        self.point_history.clear()  # 重置历史
                     except Exception:
                         pass
                 
-                # 持续捏合，执行插值移动
+                # 更新历史点
+                self.point_history.append((curr_x, curr_y))
+                
+                # 持续捏合，执行预测性样条平滑移动
                 try:
-                    # 生成插值点并移动
-                    for i in range(1, INTERPOLATION_STEPS + 1):
-                        alpha = i / (INTERPOLATION_STEPS + 1)
-                        interp_x = start_x + (curr_x - start_x) * alpha
-                        interp_y = start_y + (curr_y - start_y) * alpha
-                        pyautogui.moveTo(interp_x, interp_y, duration=0)
-                        # 不需要 sleep，pyautogui 的极小开销正好模拟了高回报率
+                    move_points = []
                     
-                    # 最后移动到目标点
+                    if len(self.point_history) >= 3:
+                        # 预测性样条插值：使用历史3点 + 预测第4点
+                        # 这样可以生成从 prev(p1) 到 curr(p2) 的平滑曲线
+                        p0 = self.point_history[-3]
+                        p1 = self.point_history[-2]
+                        p2 = self.point_history[-1]
+                        
+                        # 简单的线性预测：p3 = p2 + (p2 - p1)
+                        # 这模拟了惯性，为 Catmull-Rom 提供未来的控制点
+                        p3_x = p2[0] + (p2[0] - p1[0])
+                        p3_y = p2[1] + (p2[1] - p1[1])
+                        p3 = (int(p3_x), int(p3_y))
+                        
+                        # 生成 p1 -> p2 的平滑曲线
+                        # num_points=8 对应约 240Hz 的模拟鼠标回报率 (30fps * 8)
+                        move_points = catmull_rom_spline(p0, p1, p2, p3, num_points=8)
+                        
+                    elif len(self.point_history) == 2:
+                        # 只有两点，线性插值
+                        p_start = self.point_history[-2]
+                        p_end = self.point_history[-1]
+                        steps = 8
+                        for i in range(1, steps + 1):
+                            t = i / steps
+                            mx = int(p_start[0] + (p_end[0] - p_start[0]) * t)
+                            my = int(p_start[1] + (p_end[1] - p_start[1]) * t)
+                            move_points.append((mx, my))
+                    else:
+                        # 只有一点，直接移动
+                        move_points.append((curr_x, curr_y))
+
+                    # 执行移动序列
+                    for pt in move_points:
+                        pyautogui.moveTo(pt[0], pt[1], duration=0)
+                    
+                    # 确保最后停在目标点
                     pyautogui.moveTo(curr_x, curr_y, duration=0)
+                    
                 except Exception:
                     pass
             else:
@@ -739,9 +786,13 @@ class PPTGestureController:
                     try:
                         pyautogui.mouseUp()
                         self.mouse_down = False
+                        self.point_history.clear()
+                        # 记录释放时间，启动模式切换冷却锁
+                        self.last_pinch_release_time = time.time()
                     except Exception:
                         pass
-                # 未捏合时仅移动光标 (不需要插值，节省性能)
+                
+                # 未捏合时仅移动光标 (不需要高级平滑，线性跟随即可)
                 try:
                     pyautogui.moveTo(curr_x, curr_y, duration=0)
                 except Exception:

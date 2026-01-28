@@ -8,36 +8,7 @@ import math
 
 from modules.canvas import Canvas
 from modules.brush_manager import BrushManager
-from utils.smoothing import EmaSmoother
-
-
-def catmull_rom_spline(p0: Tuple[int, int], p1: Tuple[int, int], 
-                       p2: Tuple[int, int], p3: Tuple[int, int], 
-                       num_points: int = 8) -> List[Tuple[int, int]]:
-    """
-    计算 Catmull-Rom 样条曲线上的点序列
-    绘制的是 p1 到 p2 之间的曲线段
-    """
-    result = []
-    
-    for i in range(num_points):
-        t = i / (num_points - 1) if num_points > 1 else 0
-        t2 = t * t
-        t3 = t2 * t
-        
-        x = 0.5 * ((2 * p1[0]) +
-                   (-p0[0] + p2[0]) * t +
-                   (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
-                   (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
-        
-        y = 0.5 * ((2 * p1[1]) +
-                   (-p0[1] + p2[1]) * t +
-                   (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
-                   (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
-        
-        result.append((int(x), int(y)))
-    
-    return result
+from utils.smoothing import EmaSmoother, catmull_rom_spline
 
 
 class VirtualPen:
