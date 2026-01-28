@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
-"""虚拟画笔模块 - 钢笔效果：速度感知笔画粗细 + 贝塞尔平滑"""
+"""虚拟画笔模块 - 钢笔效果：速度感知笔画粗细 + 贝塞尔平滑 + 形状识别"""
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, TYPE_CHECKING
 import math
+import time
 
 from modules.canvas import Canvas
 from modules.brush_manager import BrushManager
 from utils.smoothing import EmaSmoother
+
+# 类型检查时导入（避免循环依赖）
+if TYPE_CHECKING:
+    from modules.shape_recognizer import RecognizedShape
 
 
 def catmull_rom_spline(p0: Tuple[int, int], p1: Tuple[int, int], 
@@ -64,6 +69,8 @@ class VirtualPen:
         max_thickness_ratio: float = 1.2,   # 最粗时的粗细比例
         speed_threshold: float = 30.0,      # 速度阈值（像素/帧）
         thickness_smoothing: float = 0.3,   # 粗细平滑系数
+        # 形状识别参数
+        enable_shape_recognition: bool = True,  # 启用形状识别
     ) -> None:
         self.canvas = canvas
         self.brush_manager = brush_manager
@@ -78,6 +85,29 @@ class VirtualPen:
         self.max_thickness_ratio = max_thickness_ratio
         self.speed_threshold = speed_threshold
         self.thickness_smoothing = thickness_smoothing
+        
+        # 形状识别
+        self.enable_shape_recognition = enable_shape_recognition
+        self.last_recognized_shape = None
+        
+        # 悬停检测（用于确认是否需要形状识别）
+        self._hover_start_time = None  # 悬停开始时间
+        self._hover_threshold = 0.5  # 悬停阈值（秒）
+        self._hover_region_radius = 15  # 悬停区域半径（像素）- 在此范围内移动算悬停
+        self._hover_center = None  # 悬停中心点
+        self._is_hovering = False  # 是否正在悬停
+        
+        # 延迟导入，避免循环依赖
+        if self.enable_shape_recognition:
+            try:
+                from modules.shape_recognizer import GeometricShapeRecognizer
+                self._shape_recognizer = GeometricShapeRecognizer()
+            except ImportError as e:
+                print(f"警告：无法加载形状识别器，功能已禁用 ({e})")
+                self.enable_shape_recognition = False
+                self._shape_recognizer = None
+        else:
+            self._shape_recognizer = None
         
         # 绘图状态
         self.prev_point: Optional[Tuple[int, int]] = None
@@ -103,6 +133,12 @@ class VirtualPen:
         self._last_curve_end = None
         self._current_thickness = 1.0
         self._last_speed = 0.0
+        
+        # 重置悬停状态
+        self._hover_start_time = None
+        self._hover_center = None
+        self._is_hovering = False
+        
         # 重置虚线相位（如果是虚线笔刷）
         if self.brush_manager.brush_type == "dashed":
             self.brush_manager.reset_dash_phase()
@@ -178,6 +214,7 @@ class VirtualPen:
         绘制一个点
         
         实现钢笔效果：根据移动速度调整笔画粗细
+        同时检测悬停状态（用于形状识别确认）
         """
         if self.smoothing:
             point = tuple(map(int, self.smoothing.push(point)))
@@ -186,6 +223,31 @@ class VirtualPen:
         speed = 0.0
         if self.prev_point is not None:
             speed = self._distance(self.prev_point, point)
+        
+        # 悬停检测（在小范围内移动算悬停）
+        if self._hover_center is None:
+            # 首次进入，设置悬停中心
+            self._hover_center = point
+            self._hover_start_time = time.time()
+        else:
+            # 检查是否在悬停区域内
+            distance_from_center = self._distance(point, self._hover_center)
+            
+            if distance_from_center <= self._hover_region_radius:
+                # 仍在悬停区域内，计算悬停时间
+                hover_duration = time.time() - self._hover_start_time
+                
+                if hover_duration >= self._hover_threshold:
+                    if not self._is_hovering:  # 首次达到悬停阈值
+                        self._is_hovering = True
+                        print(f"[悬停检测] ✓ 悬停确认（{hover_duration:.2f}s ≥ {self._hover_threshold}s）")
+            else:
+                # 移动超出悬停区域，重置
+                if self._is_hovering:
+                    print(f"[悬停检测] ✗ 移动超出悬停区域，重置")
+                self._hover_center = point
+                self._hover_start_time = time.time()
+                self._is_hovering = False
         
         # 计算当前粗细
         thickness = self._calculate_thickness(speed)
@@ -238,7 +300,15 @@ class VirtualPen:
         return point
 
     def end_stroke(self) -> List[Tuple[int, int]]:
-        """结束笔画"""
+        """
+        结束笔画
+        
+        如果启用形状识别，会尝试识别并优化手绘形状：
+        - 圆形 → 标准圆
+        - 矩形 → 标准矩形
+        - 正方形 → 标准正方形
+        - 直线 → 标准直线
+        """
         # 绘制最后几个点
         if self.enable_bezier and len(self._window) >= 2:
             thickness = self._calculate_thickness(self._last_speed)
@@ -250,8 +320,101 @@ class VirtualPen:
                         self._last_curve_end = pt
         
         finished_points = self.points.copy()
+        
+        # ========== 形状识别（只在画笔工具 + 悬停确认时启用） ==========
+        if (self.enable_shape_recognition and 
+            self._shape_recognizer and 
+            len(finished_points) > 0 and
+            self.brush_manager.tool == "pen" and
+            self._is_hovering):  # ✅ 只在悬停确认后才识别
+            
+            try:
+                print(f"[悬停确认] 开始形状识别...")
+                recognized = self._shape_recognizer.recognize(finished_points)
+                self.last_recognized_shape = recognized
+                
+                # 如果识别到标准形状，用标准形状替换手绘
+                if recognized.shape_type != "none":
+                    self._replace_with_standard_shape(recognized)
+                    print(f"✓ 识别到 {recognized.shape_type}，置信度: {recognized.confidence:.2f}")
+            except Exception as e:
+                print(f"形状识别错误: {e}")
+        elif self.enable_shape_recognition and not self._is_hovering and len(finished_points) > 0:
+            print(f"[提示] 未检测到悬停确认，跳过形状识别")
+        
         self.start_stroke()
         return finished_points
+    
+    def _replace_with_standard_shape(self, shape: "RecognizedShape") -> None:
+        """
+        用标准形状替换手绘笔画
+        
+        关键策略：
+        1. 从历史栈获取上一个画布状态（没有当前手绘的状态）
+        2. 用上一个状态覆盖当前画布（完全清除当前手绘）
+        3. 在干净的画布上绘制标准形状
+        
+        注意：不在这里保存笔画，由外部统一调用 canvas.save_stroke()
+        """
+        if not shape.points or len(self.points) == 0:
+            return
+        
+        canvas_img = self.canvas.get_canvas()
+        thickness = self.brush_manager.thickness
+        color = self.brush_manager.color
+        
+        # ===== 关键步骤1：获取历史栈中的上一个状态（没有当前手绘） =====
+        try:
+            # 访问 Canvas 的私有历史栈
+            history_stack = self.canvas._history._history
+            
+            if len(history_stack) > 0:
+                # 获取上一个画布状态（在开始当前笔画之前的状态）
+                previous_canvas = history_stack[-1].copy()
+                
+                # ===== 关键步骤2：用上一个状态覆盖当前画布（清除当前手绘） =====
+                canvas_img[:] = previous_canvas
+                
+                print(f"[形状替换] 已清除原手绘，恢复到历史状态")
+            else:
+                # 如果是第一笔（历史栈为空），清空整个画布
+                canvas_img[:] = 0
+                print(f"[形状替换] 第一笔，清空画布")
+        except Exception as e:
+            print(f"[形状替换] 警告：无法访问历史栈 ({e})，尝试直接清除")
+            # 降级方案：直接清除区域
+            points_array = np.array(self.points)
+            x_min, y_min = points_array.min(axis=0)
+            x_max, y_max = points_array.max(axis=0)
+            margin = thickness + 15
+            x_min = max(0, x_min - margin)
+            y_min = max(0, y_min - margin)
+            x_max = min(canvas_img.shape[1], x_max + margin)
+            y_max = min(canvas_img.shape[0], y_max + margin)
+            canvas_img[y_min:y_max, x_min:x_max] = 0
+        
+        # ===== 关键步骤3：绘制标准形状（在干净的画布上） =====
+        if shape.shape_type == "circle" and shape.center and shape.radius:
+            # 绘制标准圆
+            cv2.circle(canvas_img, shape.center, int(shape.radius), color, thickness, lineType=cv2.LINE_AA)
+            print(f"[形状替换] 已绘制标准圆")
+        
+        elif shape.shape_type in ["rectangle", "square"]:
+            # 绘制标准矩形/正方形（闭合路径）
+            pts = np.array(shape.points[:4], dtype=np.int32)  # 只取前4个角点
+            pts = pts.reshape((-1, 1, 2))
+            cv2.polylines(canvas_img, [pts], isClosed=True, color=color, thickness=thickness, lineType=cv2.LINE_AA)
+            print(f"[形状替换] 已绘制标准{shape.shape_type}")
+        
+        elif shape.shape_type == "line":
+            # 绘制标准直线
+            if len(shape.points) >= 2:
+                pt1 = shape.points[0]
+                pt2 = shape.points[-1]
+                cv2.line(canvas_img, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
+                print(f"[形状替换] 已绘制标准直线")
+        
+        # 注意：不在这里保存，由 main.py 统一保存
 
     @property
     def was_stroke_broken(self) -> bool:
