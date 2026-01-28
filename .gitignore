@@ -35,9 +35,20 @@ captures/
 # Environment setup scripts (local only)
 activate_conda.ps1
 
-# Temporary documentation files (use CHANGELOG.md instead)
+# Temporary documentation files
 *说明.md
 *修复*.md
 *优化*.md
 *实现*.md
+
+# 开发日志和指南（不提交到仓库，仅本地使用）
+CHANGELOG.md
+GIT_提交指南.md
+
+# 文本文件（不提交）
+*.txt
+
+# 保留 README（仍然提交）
+!README.md
+!README_CN.md
 
