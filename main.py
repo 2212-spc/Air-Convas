@@ -4,6 +4,7 @@
 核心逻辑：
 - 统一使用捏合 (Pinch) 作为主要交互手势
 - 通过左侧工具栏 (Tool) 切换功能：画笔、橡皮、激光笔
+- [Update] 集成现代化 HUD 界面，移除原生 OpenCV 调试文字
 """
 
 import sys
@@ -404,10 +405,6 @@ def main() -> None:
                 landmarks = [LandmarkAdapter(x=lm[0], y=lm[1], z=0.0) for lm in hand.landmarks_norm]
                 ppt_controller.process_hand_data(landmarks, frame)
             
-            # 显示 PPT 模式特定的 UI
-            cv2.putText(frame, "MODE: PPT PRESENTATION (Tab to Switch)", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
             # 计算 FPS
             frame_count += 1
             now = time.time()
@@ -415,7 +412,15 @@ def main() -> None:
                 fps = frame_count / (now - last_time)
                 frame_count = 0
                 last_time = now
-            cv2.putText(frame, f"FPS: {fps:.1f}", (10, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # [UI Update] PPT 模式下的 HUD
+            hud_data = {
+                "fps": fps,
+                "mode": "PPT",
+                "message": "Tab 键切换回画板"
+            }
+            # 复用 UI 的 render 来画 PPT 状态
+            gesture_ui.render(frame, brush_manager, hud_data=hud_data)
 
         else:
             # --- AirCanvas 绘图模式逻辑 ---
@@ -480,13 +485,13 @@ def main() -> None:
                 if g["swipe"] and g["three_fingers"]:
                     if g["swipe"] == "SWIPE_LEFT":
                         if canvas.undo():
-                            undo_redo_hint = "Undo"
+                            undo_redo_hint = "已撤销" # [UI Update] 中文提示
                             undo_redo_hint_frames = 30
                             effect_manager.add_ripple(draw_pt, color=(0, 0, 255))
                             print("撤销")
                     elif g["swipe"] == "SWIPE_RIGHT":
                         if canvas.redo():
-                            undo_redo_hint = "Redo"
+                            undo_redo_hint = "已重做" # [UI Update] 中文提示
                             undo_redo_hint_frames = 30
                             effect_manager.add_ripple(draw_pt, color=(0, 255, 0))
                             print("重做")
@@ -496,13 +501,13 @@ def main() -> None:
                 if g["swipe"] and g["index_only"]:
                     if g["swipe"] == "SWIPE_UP":
                         brush_manager.current_tool_index = (brush_manager.current_tool_index - 1) % len(brush_manager.TOOLS)
-                        undo_redo_hint = f"Tool: {brush_manager.tool.upper()}"
+                        undo_redo_hint = f"工具: {brush_manager.tool.upper()}"
                         undo_redo_hint_frames = 30
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 0))
                         print(f"工具切换到: {brush_manager.tool}")
                     elif g["swipe"] == "SWIPE_DOWN":
                         brush_manager.current_tool_index = (brush_manager.current_tool_index + 1) % len(brush_manager.TOOLS)
-                        undo_redo_hint = f"Tool: {brush_manager.tool.upper()}"
+                        undo_redo_hint = f"工具: {brush_manager.tool.upper()}"
                         undo_redo_hint_frames = 30
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 0))
                         print(f"工具切换到: {brush_manager.tool}")
@@ -534,8 +539,12 @@ def main() -> None:
 
                     if ui_action or (gesture_ui.hover_item and (g["pinch_start"] or dwell_selected)):
                         item_type, _ = gesture_ui.hover_item
+                        
+                        # [UI Update] 触发操作时更新提示
                         if item_type == "tool":
                             print(f"工具切换到: {brush_manager.tool}")
+                            undo_redo_hint = f"工具: {brush_manager.tool.upper()}"
+                            undo_redo_hint_frames = 30
                         elif item_type == "color":
                             print(f"颜色切换到: {brush_manager.color_name}")
                         elif item_type == "thickness":
@@ -547,17 +556,19 @@ def main() -> None:
                                 canvas.clear()
                                 temp_ink_manager.clear()
                                 particle_system.clear()
-                                undo_redo_hint = "Clear"
+                                undo_redo_hint = "画布已清空" # [UI Update] 中文提示
                                 undo_redo_hint_frames = 30
                                 print("画布已清空")
                             elif ui_action == "particles":
                                 ENABLE_PARTICLES = not ENABLE_PARTICLES
                                 if not ENABLE_PARTICLES:
                                     particle_system.clear()
+                                undo_redo_hint = f"粒子特效: {'开' if ENABLE_PARTICLES else '关'}"
+                                undo_redo_hint_frames = 30
                                 print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
                             elif ui_action == "effects":
                                 ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
-                                undo_redo_hint = f"Effects: {interactive_effects.get_effect_label()}"
+                                undo_redo_hint = f"互动特效: {interactive_effects.get_effect_label()}"
                                 undo_redo_hint_frames = 45
                                 print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'}")
 
@@ -699,7 +710,7 @@ def main() -> None:
                                     canvas.clear()
                                     temp_ink_manager.clear()
                                     particle_system.clear()
-                                    undo_redo_hint = "Clear"
+                                    undo_redo_hint = "画布已清空"
                                     undo_redo_hint_frames = 30
                                     print("画布已清空")
                                 elif action_key == "particles":
@@ -709,7 +720,7 @@ def main() -> None:
                                     print(f"Particle effects: {'ON' if ENABLE_PARTICLES else 'OFF'}")
                                 elif action_key == "effects":
                                     ENABLE_INTERACTIVE_EFFECTS = interactive_effects.toggle()
-                                    undo_redo_hint = f"Effects: {interactive_effects.get_effect_label()}"
+                                    undo_redo_hint = f"互动特效: {interactive_effects.get_effect_label()}"
                                     undo_redo_hint_frames = 45
                                     print(f"Interactive effects: {'ON' if ENABLE_INTERACTIVE_EFFECTS else 'OFF'}")
                         draw_lock = DRAW_LOCK_FRAMES
@@ -777,13 +788,9 @@ def main() -> None:
                 cv2.circle(frame, index_tip_pt, 4, (0, 255, 0), -1, lineType=cv2.LINE_AA)
                 
             if g and g["pinching"]:
-                cv2.putText(frame, f"pinch: {ui_pinch_dist:.3f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-            if undo_redo_hint:
-                alpha = min(1.0, undo_redo_hint_frames / 15.0)
-                color = (0, int(255 * alpha), int(255 * alpha))
-                cv2.putText(frame, undo_redo_hint, (config.CAMERA_WIDTH // 2 - 50, 50), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2, lineType=cv2.LINE_AA)
+                # [UI Update] 可以保留调试用的 pinch 数值，或者注释掉保持界面整洁
+                # cv2.putText(frame, f"pinch: {ui_pinch_dist:.3f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                pass
 
             # FPS计算
             frame_count += 1
@@ -793,77 +800,25 @@ def main() -> None:
                 frame_count = 0
                 last_time = now
 
-            # 状态信息
-            status_lines = [
-                f"FPS: {fps:.1f}",
-                brush_manager.get_status_text(),
-                canvas.get_history_info(),
-            ]
-            
-            # 工具大标题提示（醒目显示当前工具）
-            tool_display = {
-                "pen": "TOOL: PEN (Draw)",
-                "eraser": "TOOL: ERASER", 
-                "laser": "TOOL: LASER (Fades in 1.5s)"
+            # [UI Update] 构建 HUD 数据包
+            # 这里是核心修改点：不再使用 cv2.putText 直接绘制，而是打包数据交给 UI 渲染
+            hud_data = {
+                "fps": fps,
+                "mode": "DRAW",
+                "history": canvas.get_history_info(), # 传递 "5/10" 格式
+                "message": undo_redo_hint # 传递动态 Toast 消息
             }
-            tool_text = tool_display.get(brush_manager.tool, brush_manager.tool.upper())
-            tool_color = (0, 255, 255) if brush_manager.tool == "pen" else (0, 165, 255) if brush_manager.tool == "laser" else (0, 0, 255)
-            cv2.putText(frame, tool_text, (config.CAMERA_WIDTH // 2 - 150, 40), 
-                       cv2.FONT_HERSHEY_DUPLEX, 0.8, tool_color, 2, lineType=cv2.LINE_AA)
-
-            # 效果状态
-            effect_status = []
-            if ENABLE_PEN_EFFECT:
-                effect_status.append("Pen")
-            if ENABLE_LINE_ASSIST:
-                effect_status.append("Line")
-            if ENABLE_PARTICLES:
-                effect_status.append(f"Particles:{particle_system.get_count()}")
-            if ENABLE_LASER:
-                effect_status.append("Laser(Fade)")
-            if ENABLE_PALM_HUD:
-                effect_status.append("HUD")
-
-            if effect_status:
-                status_lines.append(f"Effects: {' | '.join(effect_status)}")
-
-            for i, line in enumerate(status_lines):
-                cv2.putText(frame, line, (10, 30 + i * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             
-            # 显示当前模式提示 (Tab切换)
-            cv2.putText(frame, "Tab: Switch to PPT Mode", (10, config.CAMERA_HEIGHT - 20), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-
-            # 显示帮助信息
-            if SHOW_HELP:
-                help_text = [
-                    "=== AirCanvas Controls ===",
-                    "Tool Selection (Left Panel):",
-                    "  - Pen: Draw (Pinch)",
-                    "  - Eraser: Erase (Pinch)",
-                    "  - Laser: Point & Fade (Pinch)",
-                    "Hand Gestures:",
-                    "  Pinch: Activate current tool",
-                    "  2 fingers: Toggle UI",
-                    "  3 fingers swipe: Undo/Redo",
-                    "Keyboard:",
-                    "  q: Quit  c: Clear  s: Save",
-                    "  z: Undo  y: Redo  h: Help",
-                    "  t: Cycle Tools",
-                    "  Tab: Switch Mode (Draw/PPT)",
-                ]
-                overlay = frame.copy()
-                y_offset = 100
-                for i, text in enumerate(help_text):
-                    cv2.putText(overlay, text, (50, y_offset + i * 22),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, lineType=cv2.LINE_AA)
-                cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
-
-            # 渲染手势UI界面
-            gesture_ui.render(frame, brush_manager, action_state={
-                "particles": ENABLE_PARTICLES, 
+            # [UI Update] 构建动作状态包
+            action_state = {
+                "particles": ENABLE_PARTICLES,
+                "line_assist": ENABLE_LINE_ASSIST,
+                "pen_effect": getattr(config, 'PEN_EFFECT_ENABLED', False),
                 "effects": ENABLE_INTERACTIVE_EFFECTS
-            })
+            }
+
+            # [UI Update] 调用新版 UI 渲染
+            gesture_ui.render(frame, brush_manager, action_state=action_state, hud_data=hud_data)
 
             # 渲染Help按钮（如果教程已完成）
             help_cursor_pos = None
@@ -908,12 +863,12 @@ def main() -> None:
             save_counter += 1
         if key == ord("z"):
             if canvas.undo():
-                undo_redo_hint = "Undo"
+                undo_redo_hint = "已撤销"
                 undo_redo_hint_frames = 30
                 print("撤销")
         if key == ord("y"):
             if canvas.redo():
-                undo_redo_hint = "Redo"
+                undo_redo_hint = "已重做"
                 undo_redo_hint_frames = 30
                 print("重做")
         if key == ord('1'):
