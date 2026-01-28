@@ -1,0 +1,2602 @@
+{
+  "meta": {
+    "version": "1.1",
+    "session_id": "20260128_224412",
+    "total_actions": 125
+  },
+  "timeline": [
+    {
+      "timestamp": 1.284496545791626,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          761,
+          553
+        ],
+        "pt2": [
+          739,
+          518
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 1.3321983814239502,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          739,
+          518
+        ],
+        "pt2": [
+          734,
+          497
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 1.366544246673584,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          734,
+          497
+        ],
+        "pt2": [
+          717,
+          457
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 1.4123339653015137,
+      "action_type": "save_stroke",
+      "data": {}
+    },
+    {
+      "timestamp": 2.079514741897583,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          573,
+          209
+        ],
+        "pt2": [
+          573,
+          209
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.1310009956359863,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          573,
+          209
+        ],
+        "pt2": [
+          574,
+          221
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.1801393032073975,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          574,
+          221
+        ],
+        "pt2": [
+          575,
+          229
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.222632884979248,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          575,
+          229
+        ],
+        "pt2": [
+          575,
+          238
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.2578368186950684,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          575,
+          238
+        ],
+        "pt2": [
+          583,
+          249
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.3042843341827393,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          583,
+          249
+        ],
+        "pt2": [
+          596,
+          256
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.346897840499878,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          596,
+          256
+        ],
+        "pt2": [
+          604,
+          262
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.395965099334717,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          604,
+          262
+        ],
+        "pt2": [
+          621,
+          265
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.4444713592529297,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          621,
+          265
+        ],
+        "pt2": [
+          631,
+          267
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.486069440841675,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          631,
+          267
+        ],
+        "pt2": [
+          648,
+          269
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.523423433303833,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          648,
+          269
+        ],
+        "pt2": [
+          659,
+          270
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.5680441856384277,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          659,
+          270
+        ],
+        "pt2": [
+          665,
+          271
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.613330602645874,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          665,
+          271
+        ],
+        "pt2": [
+          681,
+          272
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.6593852043151855,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          681,
+          272
+        ],
+        "pt2": [
+          721,
+          275
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.7099030017852783,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          721,
+          275
+        ],
+        "pt2": [
+          752,
+          279
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.7521796226501465,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          752,
+          279
+        ],
+        "pt2": [
+          765,
+          282
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.800990343093872,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          765,
+          282
+        ],
+        "pt2": [
+          783,
+          286
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.8503096103668213,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          783,
+          286
+        ],
+        "pt2": [
+          792,
+          289
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.8924171924591064,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          792,
+          289
+        ],
+        "pt2": [
+          806,
+          293
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.936846971511841,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          806,
+          293
+        ],
+        "pt2": [
+          814,
+          294
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 2.997866630554199,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          814,
+          294
+        ],
+        "pt2": [
+          842,
+          301
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.0361781120300293,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          842,
+          301
+        ],
+        "pt2": [
+          869,
+          310
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.0798449516296387,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          869,
+          310
+        ],
+        "pt2": [
+          881,
+          314
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.1163735389709473,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          881,
+          314
+        ],
+        "pt2": [
+          900,
+          319
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.1630282402038574,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          900,
+          319
+        ],
+        "pt2": [
+          908,
+          323
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.20442795753479,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          908,
+          323
+        ],
+        "pt2": [
+          920,
+          333
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.267312526702881,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          920,
+          333
+        ],
+        "pt2": [
+          934,
+          352
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.332381248474121,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          934,
+          352
+        ],
+        "pt2": [
+          946,
+          378
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.378249406814575,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          946,
+          378
+        ],
+        "pt2": [
+          955,
+          405
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.4231157302856445,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          955,
+          405
+        ],
+        "pt2": [
+          960,
+          417
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.474160671234131,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          960,
+          417
+        ],
+        "pt2": [
+          966,
+          433
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.5180423259735107,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          966,
+          433
+        ],
+        "pt2": [
+          970,
+          442
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.5613110065460205,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          970,
+          442
+        ],
+        "pt2": [
+          973,
+          458
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.597733736038208,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          973,
+          458
+        ],
+        "pt2": [
+          975,
+          464
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.645385980606079,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          975,
+          464
+        ],
+        "pt2": [
+          973,
+          477
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.6880388259887695,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          973,
+          477
+        ],
+        "pt2": [
+          965,
+          499
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.733849287033081,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          965,
+          499
+        ],
+        "pt2": [
+          949,
+          532
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.76910400390625,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          949,
+          532
+        ],
+        "pt2": [
+          921,
+          553
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.816861391067505,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          921,
+          553
+        ],
+        "pt2": [
+          907,
+          563
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.8490071296691895,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          907,
+          563
+        ],
+        "pt2": [
+          887,
+          566
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.8948745727539062,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          887,
+          566
+        ],
+        "pt2": [
+          875,
+          568
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.9290852546691895,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          875,
+          568
+        ],
+        "pt2": [
+          863,
+          564
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 3.972872257232666,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          863,
+          564
+        ],
+        "pt2": [
+          856,
+          562
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.016171455383301,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          856,
+          562
+        ],
+        "pt2": [
+          850,
+          559
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.066345691680908,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          850,
+          559
+        ],
+        "pt2": [
+          850,
+          556
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.13150429725647,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          850,
+          556
+        ],
+        "pt2": [
+          855,
+          553
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.173930883407593,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          855,
+          553
+        ],
+        "pt2": [
+          875,
+          552
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.222253322601318,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          875,
+          552
+        ],
+        "pt2": [
+          886,
+          552
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.2556986808776855,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          886,
+          552
+        ],
+        "pt2": [
+          912,
+          552
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.3020265102386475,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          912,
+          552
+        ],
+        "pt2": [
+          926,
+          552
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.345317363739014,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          926,
+          552
+        ],
+        "pt2": [
+          954,
+          553
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.406532526016235,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          954,
+          553
+        ],
+        "pt2": [
+          991,
+          549
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.44350528717041,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          991,
+          549
+        ],
+        "pt2": [
+          1046,
+          540
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.484548091888428,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1046,
+          540
+        ],
+        "pt2": [
+          1050,
+          539
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.532286643981934,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1050,
+          539
+        ],
+        "pt2": [
+          1079,
+          536
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.580323934555054,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1079,
+          536
+        ],
+        "pt2": [
+          1091,
+          544
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.623329162597656,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1091,
+          544
+        ],
+        "pt2": [
+          1099,
+          542
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.670726537704468,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1099,
+          542
+        ],
+        "pt2": [
+          1122,
+          536
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.7061543464660645,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1122,
+          536
+        ],
+        "pt2": [
+          1131,
+          531
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.752326011657715,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1131,
+          531
+        ],
+        "pt2": [
+          1148,
+          531
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.803337574005127,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1148,
+          531
+        ],
+        "pt2": [
+          1164,
+          529
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.845027446746826,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1164,
+          529
+        ],
+        "pt2": [
+          1170,
+          529
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.889299631118774,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1170,
+          529
+        ],
+        "pt2": [
+          1174,
+          528
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.930857419967651,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1174,
+          528
+        ],
+        "pt2": [
+          1196,
+          501
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 4.966928005218506,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1196,
+          501
+        ],
+        "pt2": [
+          1148,
+          500
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 5.015344142913818,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1148,
+          500
+        ],
+        "pt2": [
+          1116,
+          500
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 5.049004554748535,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          1116,
+          500
+        ],
+        "pt2": [
+          1058,
+          499
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 5.092259168624878,
+      "action_type": "save_stroke",
+      "data": {}
+    },
+    {
+      "timestamp": 6.569309949874878,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          370,
+          251
+        ],
+        "pt2": [
+          370,
+          251
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.612087726593018,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          370,
+          251
+        ],
+        "pt2": [
+          365,
+          258
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.658439636230469,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          365,
+          258
+        ],
+        "pt2": [
+          336,
+          305
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.705385446548462,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          336,
+          305
+        ],
+        "pt2": [
+          322,
+          330
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.751018524169922,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          322,
+          330
+        ],
+        "pt2": [
+          317,
+          339
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.802946090698242,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          317,
+          339
+        ],
+        "pt2": [
+          317,
+          342
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.845361948013306,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          317,
+          342
+        ],
+        "pt2": [
+          322,
+          341
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.892399311065674,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          322,
+          341
+        ],
+        "pt2": [
+          326,
+          340
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.932420492172241,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          326,
+          340
+        ],
+        "pt2": [
+          336,
+          338
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 6.983969211578369,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          336,
+          338
+        ],
+        "pt2": [
+          353,
+          336
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.026522636413574,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          353,
+          336
+        ],
+        "pt2": [
+          362,
+          334
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.075847864151001,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          362,
+          334
+        ],
+        "pt2": [
+          380,
+          331
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.125455617904663,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          380,
+          331
+        ],
+        "pt2": [
+          389,
+          330
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.170918941497803,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          389,
+          330
+        ],
+        "pt2": [
+          406,
+          329
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.215545415878296,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          406,
+          329
+        ],
+        "pt2": [
+          428,
+          329
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.264890909194946,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          428,
+          329
+        ],
+        "pt2": [
+          449,
+          332
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.315679311752319,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          449,
+          332
+        ],
+        "pt2": [
+          458,
+          334
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.356322765350342,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          458,
+          334
+        ],
+        "pt2": [
+          470,
+          342
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.406983852386475,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          470,
+          342
+        ],
+        "pt2": [
+          473,
+          358
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.453814744949341,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          473,
+          358
+        ],
+        "pt2": [
+          476,
+          364
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.499293804168701,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          476,
+          364
+        ],
+        "pt2": [
+          475,
+          387
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.541888236999512,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          475,
+          387
+        ],
+        "pt2": [
+          473,
+          412
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.579716205596924,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          473,
+          412
+        ],
+        "pt2": [
+          467,
+          434
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.624262094497681,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          467,
+          434
+        ],
+        "pt2": [
+          462,
+          443
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.66939640045166,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          462,
+          443
+        ],
+        "pt2": [
+          452,
+          454
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.716828107833862,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          452,
+          454
+        ],
+        "pt2": [
+          446,
+          459
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.760572671890259,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          446,
+          459
+        ],
+        "pt2": [
+          436,
+          467
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.795061349868774,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          436,
+          467
+        ],
+        "pt2": [
+          427,
+          474
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.841505527496338,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          427,
+          474
+        ],
+        "pt2": [
+          422,
+          479
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.885704517364502,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          422,
+          479
+        ],
+        "pt2": [
+          419,
+          482
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.939466238021851,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          419,
+          482
+        ],
+        "pt2": [
+          420,
+          483
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 7.980749845504761,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          420,
+          483
+        ],
+        "pt2": [
+          426,
+          482
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.026067018508911,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          426,
+          482
+        ],
+        "pt2": [
+          431,
+          483
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.067376375198364,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          431,
+          483
+        ],
+        "pt2": [
+          449,
+          481
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.114740133285522,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          449,
+          481
+        ],
+        "pt2": [
+          461,
+          481
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.15964412689209,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          461,
+          481
+        ],
+        "pt2": [
+          489,
+          466
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.211276292800903,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          489,
+          466
+        ],
+        "pt2": [
+          523,
+          451
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.255080699920654,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          523,
+          451
+        ],
+        "pt2": [
+          540,
+          440
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.299038171768188,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          540,
+          440
+        ],
+        "pt2": [
+          566,
+          448
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.339540481567383,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          566,
+          448
+        ],
+        "pt2": [
+          607,
+          451
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.382785558700562,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          607,
+          451
+        ],
+        "pt2": [
+          648,
+          451
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.425163507461548,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          648,
+          451
+        ],
+        "pt2": [
+          664,
+          451
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.472317934036255,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          664,
+          451
+        ],
+        "pt2": [
+          696,
+          450
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.519519329071045,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          696,
+          450
+        ],
+        "pt2": [
+          708,
+          449
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.562712669372559,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          708,
+          449
+        ],
+        "pt2": [
+          732,
+          448
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.595525741577148,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          732,
+          448
+        ],
+        "pt2": [
+          752,
+          447
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.6422700881958,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          752,
+          447
+        ],
+        "pt2": [
+          761,
+          445
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.69041395187378,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          761,
+          445
+        ],
+        "pt2": [
+          767,
+          442
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.739311456680298,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          767,
+          442
+        ],
+        "pt2": [
+          769,
+          438
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.786304473876953,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          769,
+          438
+        ],
+        "pt2": [
+          763,
+          435
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.830549240112305,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          763,
+          435
+        ],
+        "pt2": [
+          761,
+          433
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.873993873596191,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          761,
+          433
+        ],
+        "pt2": [
+          758,
+          435
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    },
+    {
+      "timestamp": 8.92355227470398,
+      "action_type": "stroke",
+      "data": {
+        "tool": "pen",
+        "pt1": [
+          758,
+          435
+        ],
+        "pt2": [
+          755,
+          436
+        ],
+        "color": [
+          0,
+          255,
+          255
+        ],
+        "thickness": 6
+      }
+    }
+  ]
+}
