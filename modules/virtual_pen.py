@@ -11,14 +11,18 @@ from modules.brush_manager import BrushManager
 from utils.smoothing import EmaSmoother
 
 
-def catmull_rom_spline(p0: Tuple[int, int], p1: Tuple[int, int], 
-                       p2: Tuple[int, int], p3: Tuple[int, int], 
-                       num_points: int = 8) -> List[Tuple[int, int]]:
+def catmull_rom_spline(
+    p0: Tuple[int, int], 
+    p1: Tuple[int, int], 
+    p2: Tuple[int, int], 
+    p3: Tuple[int, int], 
+    num_points: int = 8
+) -> List[Tuple[int, int]]:
     """
     计算 Catmull-Rom 样条曲线上的点序列
     绘制的是 p1 到 p2 之间的曲线段
     """
-    result = []
+    result: List[Tuple[int, int]] = []
     
     for i in range(num_points):
         t = i / (num_points - 1) if num_points > 1 else 0
@@ -43,13 +47,36 @@ def catmull_rom_spline(p0: Tuple[int, int], p1: Tuple[int, int],
 class VirtualPen:
     """
     虚拟钢笔 - 速度感知笔画粗细 + 贝塞尔平滑
-    
-    钢笔效果原理：
-    - 移动速度快 → 笔画细（模拟轻压）
-    - 移动速度慢 → 笔画粗（模拟重压）
-    - 粗细平滑过渡，避免突变
     """
     
+    # [Type Hints] 显式声明属性类型
+    canvas: Canvas
+    brush_manager: BrushManager
+    smoothing: Optional[EmaSmoother]
+    jump_threshold: int
+    enable_bezier: bool
+    bezier_segments: int
+    
+    # 钢笔效果参数
+    enable_pen_effect: bool
+    min_thickness_ratio: float
+    max_thickness_ratio: float
+    speed_threshold: float
+    thickness_smoothing: float
+    
+    # 绘图状态
+    prev_point: Optional[Tuple[int, int]]
+    points: List[Tuple[int, int]]
+    _stroke_broken: bool
+    
+    # 曲线缓冲
+    _window: List[Tuple[int, int]]
+    _last_curve_end: Optional[Tuple[int, int]]
+    
+    # 动态粗细状态
+    _current_thickness: float
+    _last_speed: float
+
     def __init__(
         self,
         canvas: Canvas,
@@ -80,17 +107,17 @@ class VirtualPen:
         self.thickness_smoothing = thickness_smoothing
         
         # 绘图状态
-        self.prev_point: Optional[Tuple[int, int]] = None
-        self.points: List[Tuple[int, int]] = []
+        self.prev_point = None
+        self.points = []
         self._stroke_broken = False
         
         # 滑动窗口缓冲（最多4个点）
-        self._window: List[Tuple[int, int]] = []
-        self._last_curve_end: Optional[Tuple[int, int]] = None
+        self._window = []
+        self._last_curve_end = None
         
         # 钢笔效果状态
-        self._current_thickness: float = 1.0  # 当前粗细比例
-        self._last_speed: float = 0.0
+        self._current_thickness = 1.0  # 当前粗细比例
+        self._last_speed = 0.0
 
     def start_stroke(self) -> None:
         """开始新笔画"""
@@ -112,12 +139,7 @@ class VirtualPen:
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
     def _calculate_thickness(self, speed: float) -> int:
-        """
-        根据速度计算笔画粗细（钢笔效果）
-        
-        速度快 → 细笔画（轻盈）
-        速度慢 → 粗笔画（厚重）
-        """
+        """根据速度计算笔画粗细（钢笔效果）"""
         base_thickness = self.brush_manager.thickness
         
         if not self.enable_pen_effect:
@@ -188,11 +210,7 @@ class VirtualPen:
         self._last_curve_end = curve_points[-1]
 
     def draw(self, point: Tuple[int, int]) -> Tuple[int, int]:
-        """
-        绘制一个点
-        
-        实现钢笔效果：根据移动速度调整笔画粗细
-        """
+        """绘制一个点"""
         if self.smoothing:
             point = tuple(map(int, self.smoothing.push(point)))
 
