@@ -3,7 +3,7 @@
 
 import math
 from collections import deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Any, Tuple
 
 from core.hand_detector import (
     Hand,
@@ -19,15 +19,27 @@ from core.hand_detector import distance as point_distance
 class GestureRecognizer:
     """
     手势识别器 - 工具模式版
-    
-    核心改进：
-    - 移除自动模式切换（Open Palm, Index Only）
-    - 统一使用捏合（Pinch）作为主要交互手势
-    - 保留辅助手势：
-        - 双指（Index+Middle）：开关UI
-        - 三指滑动：撤销/重做
     """
     
+    # [Type Hints] 显式声明属性类型
+    pinch_threshold: float
+    pinch_release_threshold: float
+    swipe_threshold: float
+    swipe_velocity_threshold: float
+    swipe_cooldown_frames: int
+    history: Deque[Tuple[float, float]]
+    pinch_active: bool
+    swipe_cooldown: int
+    pinch_confirm_frames: int
+    pinch_release_confirm_frames: int
+    _pinch_on_count: int
+    _pinch_off_count: int
+    
+    # 速度感知相关属性
+    pinch_velocity_boost: float
+    _pinch_dist_history: Deque[float]
+    _pinch_velocity: float
+
     def __init__(
         self,
         pinch_threshold: float,
@@ -46,7 +58,7 @@ class GestureRecognizer:
         self.swipe_threshold = swipe_threshold
         self.swipe_velocity_threshold = swipe_velocity_threshold
         self.swipe_cooldown_frames = swipe_cooldown_frames
-        self.history: Deque[tuple] = deque(maxlen=history_len)
+        self.history = deque(maxlen=history_len)
         self.pinch_active = False
         self.swipe_cooldown = 0
         self.pinch_confirm_frames = pinch_confirm_frames
@@ -56,8 +68,8 @@ class GestureRecognizer:
         
         # 速度感知相关
         self.pinch_velocity_boost = pinch_velocity_boost
-        self._pinch_dist_history: Deque[float] = deque(maxlen=pinch_history_len)
-        self._pinch_velocity: float = 0.0
+        self._pinch_dist_history = deque(maxlen=pinch_history_len)
+        self._pinch_velocity = 0.0
 
     def _thumb_up(self, hand: Hand) -> bool:
         """判断拇指是否伸展"""
@@ -106,7 +118,7 @@ class GestureRecognizer:
             return base_threshold + boost
         return base_threshold
 
-    def _update_swipe(self, wrist_xy: tuple) -> Optional[str]:
+    def _update_swipe(self, wrist_xy: Tuple[float, float]) -> Optional[str]:
         """更新挥手检测"""
         self.history.append(wrist_xy)
         if len(self.history) < self.history.maxlen:
@@ -140,18 +152,13 @@ class GestureRecognizer:
         self.swipe_cooldown = self.swipe_cooldown_frames
         return gesture
 
-    def classify(self, hand: Hand) -> Dict:
+    def classify(self, hand: Hand) -> Dict[str, Any]:
         """
         分类手势 - 工具模式
-        
-        统一逻辑：
-        - 捏合 (Pinch) = 执行当前工具动作 (画/擦/激光)
-        - 双指 (Index+Middle) = 切换UI
-        - 三指 (Index+Middle+Ring) = 撤销/重做/粒子
         """
         fingers = self.fingers_up(hand)
 
-        # 捏合检测（加入手掌尺度自适应，解决“写字小/远近变化”导致的灵敏度不一致）
+        # 捏合检测（加入手掌尺度自适应）
         thumb_tip = hand.landmarks_norm[THUMB_TIP]
         index_tip = hand.landmarks_norm[INDEX_TIP]
         pinch_dist = point_distance(thumb_tip, index_tip)
@@ -161,25 +168,23 @@ class GestureRecognizer:
         pinch_start = False
         pinch_end = False
 
-        # 用掌宽做尺度（食指MCP到小指MCP），将绝对阈值按手远近缩放
+        # 用掌宽做尺度（食指MCP到小指MCP）
         index_mcp = hand.landmarks_norm[5]
         pinky_mcp = hand.landmarks_norm[17]
         palm_width = point_distance(index_mcp, pinky_mcp)
-        ref_palm_width = 0.22  # 经验参考（归一化）；越大越“灵敏”
+        ref_palm_width = 0.22
         scale = max(0.6, min(1.6, palm_width / max(ref_palm_width, 1e-6)))
 
         adaptive_threshold = self._get_adaptive_threshold(self.pinch_threshold * scale)
         release_threshold = self.pinch_release_threshold * scale
 
         if pinch_dist < adaptive_threshold:
-            # 防误触：在阈值附近“轻微张开/悬停不动”时不计入捏合确认
-            # 典型场景：两指靠得很近但没有真正捏合，pinch_dist 会在阈值附近小幅抖动
+            # 防误触逻辑
             if not self.pinch_active:
-                hover_band = 0.012  # 阈值附近带宽（归一化）
+                hover_band = 0.012
                 near_threshold = (adaptive_threshold - hover_band) < pinch_dist < adaptive_threshold
                 low_velocity = abs(self._pinch_velocity) < 0.002
                 if near_threshold and low_velocity:
-                    # 不累积确认帧，但也不回退（避免“慢捏合永远触发不了”）
                     pass
                 else:
                     self._pinch_on_count += 1
@@ -190,14 +195,12 @@ class GestureRecognizer:
             self._pinch_off_count += 1
             self._pinch_on_count = 0
 
-        # 进入捏合确认：慢动作更严格（2帧），快速捏合仍保持灵敏（1帧）
+        # 进入捏合确认逻辑
         required_on = self.pinch_confirm_frames
         if not self.pinch_active:
-            # 快速合拢：1帧触发
             if self._pinch_velocity < -0.01:
                 required_on = min(required_on, 1)
             else:
-                # 慢动作：只有在“非常接近”阈值时才需要2帧，避免牺牲灵敏度
                 deep_pinch = pinch_dist < (adaptive_threshold - 0.018)
                 required_on = 1 if deep_pinch else max(required_on, 2)
 
@@ -210,17 +213,11 @@ class GestureRecognizer:
 
         # ========== 辅助手势检测 ==========
         fist = not any(fingers)
-        
-        # 食指+中指（其他弯曲） -> UI切换
         index_middle = fingers[1] and fingers[2] and not any(fingers[i] for i in (0, 3, 4))
-        
-        # 三指（食指+中指+无名指，拇指和小指弯曲） -> 撤销/重做
         three_fingers = fingers[1] and fingers[2] and fingers[3] and not fingers[0] and not fingers[4]
-        
-        # 只有食指（其他都弯曲） -> 工具快捷切换模式
         index_only = fingers[1] and not any(fingers[i] for i in (0, 2, 3, 4))
 
-        # 挥手检测（只在非捏合状态）
+        # 挥手检测
         wrist = hand.landmarks_norm[0]
         index_mcp = hand.landmarks_norm[5]
         pinky_mcp = hand.landmarks_norm[17]
@@ -232,12 +229,10 @@ class GestureRecognizer:
 
         # 确定模式
         mode = "idle"
-        
-        # 捏合 = 激活 (Active)
         if self.pinch_active:
             mode = "active"
         elif pinch_end:
-            mode = "active_end"  # 刚结束捏合
+            mode = "active_end"
         elif three_fingers:
             mode = "particle"
         elif fist:
