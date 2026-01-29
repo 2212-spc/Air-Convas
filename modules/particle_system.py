@@ -1,23 +1,41 @@
 # -*- coding: utf-8 -*-
 """粒子系统模块 - 为手指移动添加拖尾粒子效果"""
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional, NewType
+
 import numpy as np
 import cv2
 
+# [Type Hints] 定义物理计算相关的类型别名
+Vector2D = np.ndarray           # 二维向量 [x, y] (float32)
+ColorRGB = Tuple[int, int, int] # 颜色元组 (B, G, R)
+Position = Tuple[int, int]      # 屏幕坐标 (x, y)
+
 
 class Particle:
-    """单个粒子"""
+    """
+    单个粒子实体 (Particle Entity)
+    
+    使用 __slots__ 限制属性动态绑定，大幅减少内存占用，
+    适合在每一帧都需要处理数百个实例的场景。
+    """
     __slots__ = ['position', 'velocity', 'lifetime', 'color', 'size']
+    
+    # [Type Hints] 显式声明 __slots__ 属性类型
+    position: Vector2D
+    velocity: Vector2D
+    lifetime: float
+    color: ColorRGB
+    size: float
 
     def __init__(
         self,
         position: Tuple[float, float],
         velocity: Tuple[float, float],
         lifetime: float,
-        color: Tuple[int, int, int],
+        color: ColorRGB,
         size: float
-    ):
+    ) -> None:
         self.position = np.array(position, dtype=np.float32)
         self.velocity = np.array(velocity, dtype=np.float32)
         self.lifetime = lifetime
@@ -26,7 +44,18 @@ class Particle:
 
 
 class ParticleSystem:
-    """粒子系统 - 为手指移动添加拖尾效果"""
+    """
+    粒子系统管理器 (ParticleSystem)
+    
+    负责粒子的发射、物理更新（重力/衰减）和渲染循环。
+    """
+
+    # [Type Hints] 系统参数类型定义
+    max_particles: int
+    emit_count: int
+    gravity: float
+    fade_rate: float
+    particles: List[Particle]
 
     def __init__(
         self,
@@ -34,14 +63,14 @@ class ParticleSystem:
         emit_count: int = 5,
         gravity: float = 0.1,
         fade_rate: float = 0.98
-    ):
+    ) -> None:
         self.max_particles = max_particles
         self.emit_count = emit_count
         self.gravity = gravity
         self.fade_rate = fade_rate
-        self.particles: List[Particle] = []
+        self.particles = []
 
-    def emit(self, position: Tuple[int, int], color: Tuple[int, int, int]) -> None:
+    def emit(self, position: Position, color: ColorRGB) -> None:
         """在指定位置发射粒子"""
         # 防止粒子数量过多
         if len(self.particles) >= self.max_particles:
@@ -85,7 +114,7 @@ class ParticleSystem:
     def update(self, dt: float = 0.016) -> None:
         """更新所有粒子状态"""
         # 向量化更新（更高效）
-        alive_particles = []
+        alive_particles: List[Particle] = []
 
         for particle in self.particles:
             # 更新位置
