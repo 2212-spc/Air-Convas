@@ -48,6 +48,10 @@ GIT_提交指南.md
 # 文本文件（不提交）
 *.txt
 
+# 测试图片和截图（不提交）
+*.png
+dashed_line_test.png
+
 # 保留 README（仍然提交）
 !README.md
 !README_CN.md
