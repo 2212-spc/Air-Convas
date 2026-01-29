@@ -14,6 +14,7 @@ import os
 import glob
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Optional, Tuple, List, Dict, Any, Union
 
 # 修复 Windows 终端中文输出编码
 if sys.platform == 'win32':
@@ -35,7 +36,7 @@ except Exception:
 import config
 from core.coordinate_mapper import CoordinateMapper
 from core.gesture_recognizer import GestureRecognizer
-from core.hand_detector import HandDetector, INDEX_TIP, THUMB_TIP, MIDDLE_TIP, WRIST
+from core.hand_detector import HandDetector, Hand, INDEX_TIP, THUMB_TIP, MIDDLE_TIP, WRIST
 from core.async_detector import SyncAsyncHandDetector
 from modules.canvas import Canvas
 from modules.eraser import Eraser
@@ -51,13 +52,16 @@ from modules.temporary_ink import TemporaryInkManager
 from modules.visual_effects import EffectManager
 from modules.interactive_effects import InteractiveEffectsManager
 from modules.tutorial_manager import TutorialManager
-# [System] 导入录像与回放模块
 from modules.replay_system import ReplayRecorder, ReplayPlayer
 
 
 @dataclass
 class LandmarkAdapter:
-    """Adapter to make HandDetector landmarks compatible with PPTGestureController"""
+    """
+    数据适配器 (Adapter Pattern)
+    
+    将 HandDetector 的原始关键点数据转换为 PPT 控制器所需的格式。
+    """
     x: float
     y: float
     z: float = 0.0
@@ -65,20 +69,45 @@ class LandmarkAdapter:
 
 def overlay_canvas(frame: np.ndarray, canvas: np.ndarray) -> np.ndarray:
     """
-    Composite non-black canvas pixels onto the frame.
-    使用加法混合增强亮度，解决"看不清"的问题
+    将透明画布图层叠加到摄像头画面上。
+    
+    使用 cv2.add 进行加法混合，相比 addWeighted 能保留更好的色彩亮度，
+    解决黑色背景下线条“看不清”的问题。
+
+    Args:
+        frame (np.ndarray): 摄像头原始帧 (BGR)。
+        canvas (np.ndarray): 绘图画布层 (BGR, 黑色背景)。
+
+    Returns:
+        np.ndarray: 混合后的图像。
     """
+    # 创建掩码：找出画布上非黑色的像素区域
     mask = np.any(canvas != 0, axis=2)
+    
     if np.any(mask):
+        # 仅对有内容的区域进行混合计算，优化性能
         frame_roi = frame[mask]
         canvas_roi = canvas[mask]
         blended = cv2.add(frame_roi, canvas_roi)
         frame[mask] = blended
+        
     return frame
 
 
-def palm_center(hand) -> tuple:
-    """计算掌心中心点（归一化坐标）"""
+def palm_center(hand: Hand) -> Tuple[float, float]:
+    """
+    计算手掌几何中心（质心）。
+    
+    取手腕(WRIST)、食指根部(5)、小指根部(17)构成的三角形重心，
+    比单纯取手腕坐标更稳定，适合用于 HUD 跟随。
+
+    Args:
+        hand (Hand): 检测到的手部对象。
+
+    Returns:
+        Tuple[float, float]: 归一化的中心坐标 (x, y)。
+    """
+    # 0: Wrist, 5: Index MCP, 17: Pinky MCP
     pts = [hand.landmarks_norm[i] for i in (WRIST, 5, 17)]
     cx = sum(p[0] for p in pts) / len(pts)
     cy = sum(p[1] for p in pts) / len(pts)
@@ -109,7 +138,7 @@ def main() -> None:
     FULLSCREEN = False
     
     mouse_clicked = False
-    mouse_click_pos = None
+    mouse_click_pos: Optional[Tuple[int, int]] = None
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal mouse_clicked, mouse_click_pos
@@ -119,7 +148,8 @@ def main() -> None:
     
     cv2.setMouseCallback(config.WINDOW_NAME, mouse_callback)
 
-    def map_mouse_to_frame(pos, frame_shape):
+    def map_mouse_to_frame(pos: Optional[Tuple[int, int]], frame_shape: Tuple[int, ...]) -> Optional[Tuple[int, int]]:
+        """将窗口鼠标坐标映射回摄像头帧坐标系"""
         if pos is None: return None
         fx_w = frame_shape[1]
         fx_h = frame_shape[0]
@@ -213,8 +243,8 @@ def main() -> None:
     player = ReplayPlayer(canvas) # 播放器需要持有 canvas 引用
     
     # [System] 录像文件列表管理
-    recording_files = []      # 存储所有找到的 json 文件路径
-    current_file_index = -1   # 当前选中的文件索引
+    recording_files: List[str] = []
+    current_file_index: int = -1
     
     # [辅助函数] 刷新文件列表
     def refresh_recordings():
@@ -232,7 +262,7 @@ def main() -> None:
     # 启动时先刷新一次
     refresh_recordings()
     
-    prev_record_pt = None
+    prev_record_pt: Optional[Tuple[int, int]] = None
 
     pen = VirtualPen(
         canvas=canvas,
@@ -266,7 +296,7 @@ def main() -> None:
 
     # 全局状态
     APP_MODE = "DRAW" # DRAW, PPT, REPLAY
-    fps = 0
+    fps = 0.0
     last_time = time.time()
     frame_count = 0
     save_counter = 0
@@ -333,7 +363,7 @@ def main() -> None:
             # 3. 渲染
             frame = overlay_canvas(frame, canvas.get_canvas())
             
-            # 4. 显示回放进度 HUD [修复：解决右上角撤销数变大问题]
+            # 4. 显示回放进度 HUD
             progress = player.get_progress()
             hud_data = {
                 "fps": fps,
@@ -581,11 +611,7 @@ def main() -> None:
                 frame_count = 0; last_time = time.time()
 
             # [UI Update] HUD 逻辑优化
-            # 1. 默认情况下，只显示录制状态 (REC)
             rec_msg = "REC ●" if recorder.is_recording else ""
-            
-            # 2. 如果有 undo_redo_hint (如 "切换: replay_...json" 或 "开始录制")，优先显示它
-            # 3. 如果在 REPLAY 模式，已经在上面设置了 message 显示进度，这里不需要覆盖
             
             final_msg = ""
             if undo_redo_hint:
@@ -593,10 +619,8 @@ def main() -> None:
             elif rec_msg:
                 final_msg = rec_msg
             elif APP_MODE == "REPLAY":
-                # 在 REPLAY 模式下不处理，直接使用上面 block 里设置的 hud_data
                 pass 
             else:
-                # 既没录制，也没操作提示 -> 不显示文件名，保持清爽
                 final_msg = ""
 
             hud_data = {
@@ -633,7 +657,6 @@ def main() -> None:
             if recording_files:
                 current_file_index = (current_file_index + 1) % len(recording_files)
                 fname = os.path.basename(recording_files[current_file_index])
-                # 只在切换时显示 2秒 (由 undo_redo_hint_frames 控制)
                 undo_redo_hint = f"切换: {fname[-15:]}"; undo_redo_hint_frames = 60
         
         if key == ord("b"): # Back
@@ -668,7 +691,6 @@ def main() -> None:
                     if player.load_file(target):
                         APP_MODE = "REPLAY"
                         player.play(speed=1.5)
-                        # 开始播放时显示一下文件名
                         undo_redo_hint = f"回放: {fname[-15:]}"; undo_redo_hint_frames = 60
                     else:
                         undo_redo_hint = "文件损坏"; undo_redo_hint_frames = 30
