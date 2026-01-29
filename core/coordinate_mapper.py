@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""坐标映射模块 - 将归一化坐标映射到屏幕坐标并进行平滑处理"""
+"""坐标映射模块 - 处理坐标转换与平滑算法"""
 
 from typing import Optional, Tuple, Literal, List
 
@@ -10,10 +10,20 @@ from utils.smoothing import OneEuroFilter, AdaptiveEmaFilter
 
 class CoordinateMapper:
     """
-    坐标映射器 - 将归一化坐标映射到屏幕坐标并进行平滑处理
+    坐标映射器 (CoordinateMapper)
+    
+    负责将摄像头捕捉到的归一化坐标 (0.0~1.0) 映射到屏幕像素坐标，
+    并应用多种平滑算法以消除抖动，实现平滑跟手效果。
+
+    Attributes:
+        screen_w (int): 目标屏幕宽度（像素）。
+        screen_h (int): 目标屏幕高度（像素）。
+        x1, y1, x2, y2 (float): 活动区域的归一化边界坐标。
+        smoothing_factor (float): EMA 平滑因子。
+        smoothing_mode (str): 当前使用的平滑模式 ('ema', 'one_euro', 'adaptive')。
     """
     
-    # [Type Hints] 显式声明类属性类型，提升代码健壮性
+    # [Type Hints] 显式声明类属性类型
     screen_w: int
     screen_h: int
     x1: float
@@ -37,6 +47,17 @@ class CoordinateMapper:
         one_euro_min_cutoff: float = 1.0,
         one_euro_beta: float = 0.007,
     ) -> None:
+        """
+        初始化坐标映射器。
+
+        Args:
+            screen_size (Tuple[int, int]): 屏幕分辨率 (width, height)。
+            active_region (Tuple[float, float, float, float]): 手部活动区域 (x1, y1, x2, y2)。
+            smoothing_factor (float, optional): EMA 平滑系数，仅在 mode='ema' 时有效。默认为 0.4。
+            smoothing_mode (Literal, optional): 平滑算法模式。默认为 'one_euro'。
+            one_euro_min_cutoff (float, optional): 1€ Filter 的最小截止频率。默认为 1.0。
+            one_euro_beta (float, optional): 1€ Filter 的速度系数。默认为 0.007。
+        """
         self.screen_w, self.screen_h = screen_size
         self.x1, self.y1, self.x2, self.y2 = active_region
         self.smoothing_factor = smoothing_factor
@@ -59,13 +80,25 @@ class CoordinateMapper:
         )
 
     def reset(self) -> None:
-        """重置平滑状态"""
+        """
+        重置所有滤波器的内部状态。
+        
+        当手部丢失或重新检测到手部时应当调用此方法，防止坐标跳变。
+        """
         self._smoothed = None
         self._one_euro.reset()
         self._adaptive.reset()
 
     def map(self, norm_point: Tuple[float, float]) -> Tuple[int, int]:
-        """Map normalized camera coords (0-1) to screen pixels with smoothing."""
+        """
+        将归一化坐标映射到屏幕坐标，并应用平滑滤波。
+
+        Args:
+            norm_point (Tuple[float, float]): 归一化的 (x, y) 坐标，范围通常在 0.0 到 1.0 之间。
+
+        Returns:
+            Tuple[int, int]: 映射并平滑后的屏幕像素坐标 (x, y)。
+        """
         x: float
         y: float
         x, y = norm_point
