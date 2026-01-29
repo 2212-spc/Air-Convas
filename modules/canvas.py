@@ -3,39 +3,29 @@
 
 import cv2
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from collections import deque
 
 
 class StrokeHistory:
     """
     笔画历史管理器 - 支持撤销/重做功能
-    
-    实现原理：
-    - 每完成一笔，保存当前画布快照到历史栈
-    - 撤销：恢复到上一个快照
-    - 重做：恢复到下一个快照
     """
     
-    def __init__(self, max_history: int = 50):
-        """
-        初始化历史管理器
-        
-        Args:
-            max_history: 最大历史记录数
-        """
+    # [Type Hints] 显式声明属性类型
+    max_history: int
+    _history: List[np.ndarray]
+    _redo_stack: List[np.ndarray]
+    _current_index: int
+
+    def __init__(self, max_history: int = 50) -> None:
         self.max_history = max_history
-        self._history: List[np.ndarray] = []  # 历史快照栈
-        self._redo_stack: List[np.ndarray] = []  # 重做栈
+        self._history = []  # 历史快照栈
+        self._redo_stack = []  # 重做栈
         self._current_index = -1  # 当前位置
     
     def push(self, canvas_snapshot: np.ndarray) -> None:
-        """
-        保存画布快照
-        
-        Args:
-            canvas_snapshot: 画布的副本
-        """
+        """保存画布快照"""
         # 清空重做栈（新操作会使重做历史失效）
         self._redo_stack.clear()
         
@@ -57,15 +47,7 @@ class StrokeHistory:
         return len(self._redo_stack) > 0
     
     def undo(self, current_canvas: np.ndarray) -> Optional[np.ndarray]:
-        """
-        撤销操作
-        
-        Args:
-            current_canvas: 当前画布（用于保存到重做栈）
-        
-        Returns:
-            上一个画布快照，如果无法撤销则返回 None
-        """
+        """撤销操作"""
         if not self.can_undo():
             return None
         
@@ -76,15 +58,7 @@ class StrokeHistory:
         return self._history.pop()
     
     def redo(self, current_canvas: np.ndarray) -> Optional[np.ndarray]:
-        """
-        重做操作
-        
-        Args:
-            current_canvas: 当前画布（用于保存到历史栈）
-        
-        Returns:
-            下一个画布快照，如果无法重做则返回 None
-        """
+        """重做操作"""
         if not self.can_redo():
             return None
         
@@ -114,22 +88,15 @@ class StrokeHistory:
 class Canvas:
     """
     画布类 - 管理绘图画布，支持撤销/重做
-    
-    特点：
-    - 基础绘图功能（画线、擦除、清空）
-    - 集成 StrokeHistory 实现撤销/重做
-    - 自动在笔画结束时保存快照
     """
+
+    # [Type Hints] 显式声明属性类型
+    width: int
+    height: int
+    _canvas: np.ndarray
+    _history: StrokeHistory
     
     def __init__(self, width: int, height: int, max_history: int = 50) -> None:
-        """
-        初始化画布
-        
-        Args:
-            width: 画布宽度
-            height: 画布高度
-            max_history: 最大历史记录数
-        """
         self.width = width
         self.height = height
         self._canvas = np.zeros((height, width, 3), dtype=np.uint8)
@@ -138,11 +105,17 @@ class Canvas:
         # 保存初始空白状态
         self._history.push(self._canvas)
 
-    def draw_line(self, pt1, pt2, color, thickness: int) -> None:
+    def draw_line(
+        self, 
+        pt1: Tuple[int, int], 
+        pt2: Tuple[int, int], 
+        color: Tuple[int, int, int], 
+        thickness: int
+    ) -> None:
         """绘制线条"""
         cv2.line(self._canvas, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
 
-    def erase(self, center, radius: int) -> None:
+    def erase(self, center: Tuple[int, int], radius: int) -> None:
         """擦除区域"""
         cv2.circle(self._canvas, center, radius, (0, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
 
@@ -167,20 +140,11 @@ class Canvas:
     # ========== 撤销/重做功能 ==========
     
     def save_stroke(self) -> None:
-        """
-        保存当前笔画（在笔画结束时调用）
-        
-        这会将当前画布状态保存到历史栈，使其可以被撤销
-        """
+        """保存当前笔画（在笔画结束时调用）"""
         self._history.push(self._canvas.copy())
     
     def undo(self) -> bool:
-        """
-        撤销上一步操作
-        
-        Returns:
-            是否成功撤销
-        """
+        """撤销上一步操作"""
         snapshot = self._history.undo(self._canvas)
         if snapshot is not None:
             self._canvas[:] = snapshot
@@ -188,12 +152,7 @@ class Canvas:
         return False
     
     def redo(self) -> bool:
-        """
-        重做上一步撤销的操作
-        
-        Returns:
-            是否成功重做
-        """
+        """重做上一步撤销的操作"""
         snapshot = self._history.redo(self._canvas)
         if snapshot is not None:
             self._canvas[:] = snapshot
