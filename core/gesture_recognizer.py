@@ -18,7 +18,21 @@ from core.hand_detector import distance as point_distance
 
 class GestureRecognizer:
     """
-    手势识别器 - 工具模式版
+    手势识别器 (GestureRecognizer)
+    
+    负责分析手部关键点，识别出语义化的交互手势。
+    
+    核心算法特点：
+    1. 自适应捏合阈值：根据手掌与摄像头的距离（掌宽）自动缩放捏合阈值。
+    2. 速度感知：快速捏合时减少确认帧数，提升响应速度；慢速捏合时增加稳定性。
+    3. 状态防抖：使用确认帧计数器消除临界值抖动。
+
+    Attributes:
+        pinch_threshold (float): 捏合触发的基础阈值。
+        pinch_release_threshold (float): 捏合释放的基础阈值（使用滞后比较以防止抖动）。
+        swipe_threshold (float): 挥手判定的最小位移阈值。
+        history (Deque): 挥手检测使用的位置历史队列。
+        pinch_active (bool): 当前是否处于捏合状态。
     """
     
     # [Type Hints] 显式声明属性类型
@@ -53,6 +67,17 @@ class GestureRecognizer:
         pinch_velocity_boost: float = 0.02,
         pinch_history_len: int = 5,
     ) -> None:
+        """
+        初始化手势识别器。
+
+        Args:
+            pinch_threshold (float): 捏合触发阈值（归一化距离）。
+            pinch_release_threshold (float): 捏合释放阈值。
+            swipe_threshold (float): 挥手最小位移。
+            swipe_velocity_threshold (float, optional): 挥手最小速度。
+            pinch_confirm_frames (int, optional): 捏合生效所需的连续帧数（防误触）。
+            pinch_velocity_boost (float, optional): 快速捏合时的阈值补偿系数。
+        """
         self.pinch_threshold = pinch_threshold
         self.pinch_release_threshold = pinch_release_threshold
         self.swipe_threshold = swipe_threshold
@@ -72,7 +97,7 @@ class GestureRecognizer:
         self._pinch_velocity = 0.0
 
     def _thumb_up(self, hand: Hand) -> bool:
-        """判断拇指是否伸展"""
+        """判断拇指是否伸展 (基于 x 坐标相对位置)。"""
         tip_x, _ = hand.landmarks_norm[THUMB_TIP]
         base_x, _ = hand.landmarks_norm[THUMB_TIP - 1]
         if hand.handedness == "LEFT":
@@ -80,13 +105,18 @@ class GestureRecognizer:
         return tip_x > base_x
 
     def _finger_up(self, hand: Hand, tip_idx: int) -> bool:
-        """判断手指是否伸展"""
+        """判断手指是否伸展 (基于 y 坐标相对位置)。"""
         tip_y = hand.landmarks_norm[tip_idx][1]
         base_y = hand.landmarks_norm[tip_idx - 2][1]
         return tip_y < base_y
 
     def fingers_up(self, hand: Hand) -> List[bool]:
-        """返回五指伸展状态"""
+        """
+        获取所有手指的伸展状态。
+        
+        Returns:
+            List[bool]: 包含5个布尔值的列表 [拇指, 食指, 中指, 无名指, 小指]。
+        """
         return [
             self._thumb_up(hand),
             self._finger_up(hand, INDEX_TIP),
@@ -96,7 +126,11 @@ class GestureRecognizer:
         ]
 
     def _update_pinch_velocity(self, pinch_dist: float) -> float:
-        """更新捏合速度"""
+        """
+        计算捏合动作的瞬时速度。
+        
+        用于区分“快速点击”和“慢速接近”。
+        """
         self._pinch_dist_history.append(pinch_dist)
         if len(self._pinch_dist_history) < 2:
             return 0.0
@@ -111,7 +145,11 @@ class GestureRecognizer:
         return recent_change
 
     def _get_adaptive_threshold(self, base_threshold: float) -> float:
-        """获取自适应捏合阈值"""
+        """
+        根据捏合速度动态调整阈值。
+        
+        当检测到快速闭合动作时，临时放宽阈值，提高响应灵敏度。
+        """
         if self._pinch_velocity < -0.005:
             speed_factor = min(1.0, abs(self._pinch_velocity) / 0.02)
             boost = self.pinch_velocity_boost * speed_factor
@@ -119,7 +157,14 @@ class GestureRecognizer:
         return base_threshold
 
     def _update_swipe(self, wrist_xy: Tuple[float, float]) -> Optional[str]:
-        """更新挥手检测"""
+        """
+        检测挥手手势 (Swipe)。
+        
+        原理：计算手掌中心在一段时间内的位移矢量。
+        
+        Returns:
+            Optional[str]: 'SWIPE_LEFT', 'SWIPE_RIGHT', 'SWIPE_UP', 'SWIPE_DOWN' 或 None。
+        """
         self.history.append(wrist_xy)
         if len(self.history) < self.history.maxlen:
             return None
@@ -154,7 +199,16 @@ class GestureRecognizer:
 
     def classify(self, hand: Hand) -> Dict[str, Any]:
         """
-        分类手势 - 工具模式
+        主分类函数 - 识别当前帧的手势意图。
+
+        包含以下核心逻辑：
+        1. 基础手指状态检测。
+        2. 自适应捏合检测 (Pinch Detection)。
+        3. 辅助手势判定 (Fist, Index+Middle, etc.)。
+        4. 挥手检测 (Swipe)。
+
+        Returns:
+            Dict[str, Any]: 包含手势状态、模式、捏合数据等信息的字典。
         """
         fingers = self.fingers_up(hand)
 
@@ -178,8 +232,9 @@ class GestureRecognizer:
         adaptive_threshold = self._get_adaptive_threshold(self.pinch_threshold * scale)
         release_threshold = self.pinch_release_threshold * scale
 
+        # 状态机逻辑
         if pinch_dist < adaptive_threshold:
-            # 防误触逻辑
+            # 防误触：在阈值附近“轻微张开/悬停不动”时不计入捏合确认
             if not self.pinch_active:
                 hover_band = 0.012
                 near_threshold = (adaptive_threshold - hover_band) < pinch_dist < adaptive_threshold
@@ -195,7 +250,7 @@ class GestureRecognizer:
             self._pinch_off_count += 1
             self._pinch_on_count = 0
 
-        # 进入捏合确认逻辑
+        # 进入捏合确认：慢动作更严格，快速捏合更灵敏
         required_on = self.pinch_confirm_frames
         if not self.pinch_active:
             if self._pinch_velocity < -0.01:
@@ -256,7 +311,11 @@ class GestureRecognizer:
         }
     
     def reset_pinch_history(self) -> None:
-        """重置捏合历史"""
+        """
+        重置捏合历史和状态计数器。
+        
+        应当在手部丢失或场景重置时调用。
+        """
         self._pinch_dist_history.clear()
         self._pinch_velocity = 0.0
         self._pinch_on_count = 0
