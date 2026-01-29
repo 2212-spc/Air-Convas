@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """AirCanvas - 隔空绘手：基于手势识别的虚拟演示系统
 
-核心逻辑：
-- 统一使用捏合 (Pinch) 作为主要交互手势
-- 通过左侧工具栏 (Tool) 切换功能：画笔、橡皮、激光笔
-- [System] 集成 ReplaySystem (录制 + 回放 + 文件管理)
+本文件是程序的入口点 (Entry Point)，负责：
+1. 系统初始化：摄像头、OpenCV 窗口、各大功能模块。
+2. 主循环调度：帧捕获 -> 手部检测 -> 手势识别 -> 业务逻辑 -> 渲染。
+3. 全局状态管理：维护 APP_MODE (DRAW/PPT/REPLAY) 及输入事件分发。
 """
 
 import sys
@@ -14,6 +14,7 @@ import os
 import glob
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Optional, Tuple, List, Dict, Any, Union
 
 # 修复 Windows 终端中文输出编码
 if sys.platform == 'win32':
@@ -35,7 +36,7 @@ except Exception:
 import config
 from core.coordinate_mapper import CoordinateMapper
 from core.gesture_recognizer import GestureRecognizer
-from core.hand_detector import HandDetector, INDEX_TIP, THUMB_TIP, MIDDLE_TIP, WRIST
+from core.hand_detector import HandDetector, Hand, INDEX_TIP, THUMB_TIP, MIDDLE_TIP, WRIST
 from core.async_detector import SyncAsyncHandDetector
 from modules.canvas import Canvas
 from modules.eraser import Eraser
@@ -58,17 +59,14 @@ from modules.replay_system import ReplayRecorder, ReplayPlayer
 
 @dataclass
 class LandmarkAdapter:
-    """Adapter to make HandDetector landmarks compatible with PPTGestureController"""
+    """数据适配器，将 HandDetector 关键点转换为 PPT 控制器格式。"""
     x: float
     y: float
     z: float = 0.0
 
 
 def overlay_canvas(frame: np.ndarray, canvas: np.ndarray) -> np.ndarray:
-    """
-    Composite non-black canvas pixels onto the frame.
-    使用加法混合增强亮度，解决"看不清"的问题
-    """
+    """将透明画布图层叠加到摄像头画面上 (cv2.add)。"""
     mask = np.any(canvas != 0, axis=2)
     if np.any(mask):
         frame_roi = frame[mask]
@@ -78,8 +76,8 @@ def overlay_canvas(frame: np.ndarray, canvas: np.ndarray) -> np.ndarray:
     return frame
 
 
-def palm_center(hand) -> tuple:
-    """计算掌心中心点（归一化坐标）"""
+def palm_center(hand: Hand) -> Tuple[float, float]:
+    """计算手掌质心 (Wrist, Index MCP, Pinky MCP 三角形重心)。"""
     pts = [hand.landmarks_norm[i] for i in (WRIST, 5, 17)]
     cx = sum(p[0] for p in pts) / len(pts)
     cy = sum(p[1] for p in pts) / len(pts)
@@ -87,6 +85,26 @@ def palm_center(hand) -> tuple:
 
 
 def main() -> None:
+    """
+    主程序入口函数。
+
+    流程概要：
+    1. **Setup**: 初始化摄像头、窗口、手部检测器 (AsyncDetector)。
+    2. **Init Modules**: 实例化画布、画笔、手势识别器、录像机等所有功能模块。
+    3. **Loop**:
+       - 读取摄像头帧。
+       - 检测手部关键点 (Hand Detection)。
+       - 识别手势意图 (Gesture Recognition)。
+       - 分发逻辑 (Dispatch):
+         - **DRAW 模式**: 执行绘画、擦除、UI 交互。
+         - **PPT 模式**: 执行翻页手势。
+         - **REPLAY 模式**: 执行录像回放。
+       - 渲染画面 (Render)。
+       - 处理键盘事件。
+    4. **Cleanup**: 释放资源。
+    """
+    
+    # ==================== 1. 系统初始化 ====================
     cap = cv2.VideoCapture(config.CAMERA_ID)
     if not cap.isOpened():
         print(f"错误：无法打开摄像头 {config.CAMERA_ID}")
@@ -94,13 +112,12 @@ def main() -> None:
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-    
-    # 摄像头优化设置
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
     cap.set(cv2.CAP_PROP_FOCUS, 30)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
     
+    # 预热摄像头
     for _ in range(3):
         cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         cap.read()
@@ -109,8 +126,9 @@ def main() -> None:
     cv2.resizeWindow(config.WINDOW_NAME, config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
     FULLSCREEN = False
     
+    # 鼠标回调设置
     mouse_clicked = False
-    mouse_click_pos = None
+    mouse_click_pos: Optional[Tuple[int, int]] = None
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal mouse_clicked, mouse_click_pos
@@ -120,7 +138,7 @@ def main() -> None:
     
     cv2.setMouseCallback(config.WINDOW_NAME, mouse_callback)
 
-    def map_mouse_to_frame(pos, frame_shape):
+    def map_mouse_to_frame(pos: Optional[Tuple[int, int]], frame_shape: Tuple[int, ...]) -> Optional[Tuple[int, int]]:
         if pos is None: return None
         fx_w = frame_shape[1]
         fx_h = frame_shape[0]
@@ -134,7 +152,7 @@ def main() -> None:
         y = int(pos[1] * sy)
         return (max(0, min(fx_w - 1, x)), max(0, min(fx_h - 1, y)))
 
-    # 初始化检测器
+    # 启动异步手部检测线程
     detector = SyncAsyncHandDetector(
         async_mode=getattr(config, 'ASYNC_INFERENCE', True),
         max_num_hands=1,
@@ -149,6 +167,7 @@ def main() -> None:
             pyautogui.FAILSAFE = False
         except Exception: pass
 
+    # ==================== 2. 模块实例化 ====================
     gesture = GestureRecognizer(
         pinch_threshold=config.PINCH_THRESHOLD,
         pinch_release_threshold=config.PINCH_RELEASE_THRESHOLD,
@@ -160,7 +179,7 @@ def main() -> None:
         pinch_velocity_boost=getattr(config, 'PINCH_VELOCITY_BOOST', 0.02),
     )
 
-    # 坐标映射器初始化
+    # 坐标映射器 (OneEuroFilter 平滑)
     one_euro_min_cutoff = getattr(config, 'ONE_EURO_MIN_CUTOFF', 1.2)
     one_euro_beta = getattr(config, 'ONE_EURO_BETA', 0.03)
     
@@ -226,39 +245,33 @@ def main() -> None:
 
     # 画布
     canvas = Canvas(
-        config.CAMERA_WIDTH, 
+        config.CAMERA_WIDTH,
         config.CAMERA_HEIGHT,
-        max_history=getattr(config, 'MAX_HISTORY', 50)
+        max_history=getattr(config, 'MAX_HISTORY', 50),
     )
 
     # 笔刷管理器
     brush_manager = BrushManager()
     
-    # [System] 录像与播放模块初始化
+    # 录像与回放子系统
     recorder = ReplayRecorder()
-    player = ReplayPlayer(canvas) # 播放器需要持有 canvas 引用
+    player = ReplayPlayer(canvas)
     
-    # [System] 录像文件列表管理
-    recording_files = []      # 存储所有找到的 json 文件路径
-    current_file_index = -1   # 当前选中的文件索引
+    recording_files: List[str] = []
+    current_file_index: int = -1
     
-    # [辅助函数] 刷新文件列表
     def refresh_recordings():
         nonlocal recording_files, current_file_index
         folder = "recordings"
         if not os.path.exists(folder): return
-        # 获取所有 json 文件
         files = glob.glob(os.path.join(folder, '*.json'))
-        # 按创建时间排序（旧 -> 新）
         recording_files = sorted(files, key=os.path.getctime)
-        # 默认选中最新的
         if recording_files:
             current_file_index = len(recording_files) - 1
             
-    # 启动时先刷新一次
     refresh_recordings()
     
-    prev_record_pt = None
+    prev_record_pt: Optional[Tuple[int, int]] = None
 
     pen = VirtualPen(
         canvas=canvas,
@@ -293,9 +306,9 @@ def main() -> None:
     # 粒子特效管理器
     particle_mode_manager = ParticleModeManager(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
 
-    # 全局状态
-    APP_MODE = "DRAW" # DRAW, PPT, REPLAY
-    fps = 0
+    # 全局状态变量
+    APP_MODE = "DRAW" # 模式枚举: DRAW, PPT, REPLAY
+    fps = 0.0
     last_time = time.time()
     frame_count = 0
     save_counter = 0
@@ -318,12 +331,13 @@ def main() -> None:
     undo_redo_hint = ""
     undo_redo_hint_frames = 0
 
+    # ==================== 3. 主循环 ====================
     while True:
         ret, frame = cap.read()
         if not ret: break
         frame = cv2.flip(frame, 1)
 
-        # 教程逻辑 (优先级最高)
+        # 教程逻辑 (High Priority Override)
         if tutorial_manager.is_active:
             hands = detector.detect(frame)
             cursor_pos = None
@@ -422,34 +436,29 @@ def main() -> None:
         if undo_redo_hint_frames > 0: undo_redo_hint_frames -= 1
         else: undo_redo_hint = ""
         
-        # [System] 核心逻辑分流: 回放模式 vs 实时模式
+        # 核心逻辑分流: REPLAY -> PPT -> DRAW
         if APP_MODE == "REPLAY":
-            # --- 回放模式逻辑 ---
-            # 1. 停止更新手势，只运行播放器
             player.update()
             
-            # 2. 如果播放结束，自动切回 DRAW
+            # 播放结束自动切换
             if not player.is_playing:
                 APP_MODE = "DRAW"
                 undo_redo_hint = "播放结束"
                 undo_redo_hint_frames = 40
             
-            # 3. 渲染
             frame = overlay_canvas(frame, canvas.get_canvas())
             
-            # 4. 显示回放进度 HUD [修复：解决右上角撤销数变大问题]
+            # HUD 显示进度
             progress = player.get_progress()
             hud_data = {
                 "fps": fps,
                 "mode": "REPLAY",
-                "history": canvas.get_history_info(), # 恢复显示真实的历史步数
-                "message": f"回放进度: {int(progress*100)}%  (按 P 停止)" # 进度移到这里显示
+                "history": canvas.get_history_info(),
+                "message": f"回放进度: {int(progress*100)}%  (按 P 停止)"
             }
-            # 回放时不显示动作按钮，只显示HUD
             gesture_ui.render(frame, brush_manager, hud_data=hud_data)
 
         elif APP_MODE == "PPT":
-            # --- PPT 模式逻辑 ---
             hands = detector.detect(frame)
             if hands:
                 detector.draw_hand(frame, hands[0])
@@ -475,7 +484,7 @@ def main() -> None:
             gesture_ui.render(frame, brush_manager, hud_data=hud_data)
 
         else:
-            # --- DRAW 模式 (AirCanvas 核心) ---
+            # --- DRAW 模式核心逻辑 ---
             hands = detector.detect(frame)
             
             current_mode = "idle"
@@ -498,6 +507,7 @@ def main() -> None:
                 middle_norm = hand.landmarks_norm[MIDDLE_TIP]
                 palm_norm = palm_center(hand)
 
+                # 捏合时取两指中点，否则取食指尖
                 tip_norm = ((index_norm[0] + thumb_norm[0]) / 2.0, (index_norm[1] + thumb_norm[1]) / 2.0) if g["pinching"] else index_norm
 
                 draw_pt = draw_mapper.map(tip_norm)
@@ -513,10 +523,10 @@ def main() -> None:
                 # 视觉反馈
                 if g["pinch_start"]: effect_manager.add_ripple(draw_pt, color=(0, 255, 255))
                 if g["index_middle"]:
-                    click_pt = draw_mapper.map(index_norm) # Simplified click pos
+                    click_pt = draw_mapper.map(index_norm)
                     if frame_count % 10 == 0: effect_manager.add_ripple(click_pt, color=(0, 255, 0))
 
-                # 撤销/重做 (集成录像)
+                # 动作检测：撤销/重做
                 if g["swipe"] and g["three_fingers"]:
                     if g["swipe"] == "SWIPE_LEFT":
                         if canvas.undo():
@@ -529,7 +539,7 @@ def main() -> None:
                             effect_manager.add_ripple(draw_pt, color=(0, 255, 0))
                             if recorder.is_recording: recorder.record_event("redo")
                 
-                # 工具切换
+                # 动作检测：工具切换
                 if g["swipe"] and g["index_only"]:
                     if g["swipe"] == "SWIPE_UP":
                         brush_manager.current_tool_index = (brush_manager.current_tool_index - 1) % len(brush_manager.TOOLS)
@@ -540,7 +550,7 @@ def main() -> None:
                         undo_redo_hint = f"工具: {brush_manager.tool.upper()}"; undo_redo_hint_frames = 30
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 0))
 
-                # UI 交互
+                # UI 交互检测
                 if gesture_ui.visible and index_tip_pt:
                     if not g["pinching"]:
                         gesture_ui.update_hover(index_tip_pt, brush_manager)
@@ -575,7 +585,7 @@ def main() -> None:
                         draw_lock = DRAW_LOCK_FRAMES
                         effect_manager.add_ripple(draw_pt, color=(255, 255, 255))
 
-                # ========== 绘图逻辑 (含录像) ==========
+                # 绘图逻辑执行
                 if g["pinch_start"]:
                     if not gesture_ui.is_in_dead_zone(draw_pt, brush_manager):
                         if brush_manager.tool == "pen":
@@ -593,7 +603,7 @@ def main() -> None:
                             smoothed_pt = pen.draw(ink_pt)
                             if ENABLE_PARTICLES: particle_system.emit(ink_pt, brush_manager.color)
                             
-                            # [Recorder] 记录
+                            # 录制笔画片段
                             if recorder.is_recording and prev_record_pt:
                                 recorder.record_stroke_segment(prev_record_pt, smoothed_pt, brush_manager.color, brush_manager.thickness, "pen")
                             prev_record_pt = smoothed_pt
@@ -629,14 +639,12 @@ def main() -> None:
                                 if beautified: effect_manager.add_ripple(tuple(np.mean(finished_points, axis=0).astype(int)), color=(0, 255, 0))
                             
                             canvas.save_stroke()
-                            # [关键修复] 记录 save_stroke 事件
                             if recorder.is_recording: recorder.record_event("save_stroke")
-                            
                             stroke_end_positions.clear()
                     elif brush_manager.tool == "laser":
                         temp_ink_manager.end_stroke()
 
-            # 鼠标逻辑
+            # 鼠标模拟事件处理
             if mouse_clicked:
                 mapped = map_mouse_to_frame(mouse_click_pos, frame.shape)
                 consumed = False
@@ -662,7 +670,7 @@ def main() -> None:
                 if mapped and not consumed: tutorial_manager.handle_click(mapped)
                 mouse_clicked = False
 
-            # 特效与渲染
+            # 特效层更新与渲染
             temp_ink_manager.update(); effect_manager.update()
             if ENABLE_PARTICLES: particle_system.update()
             if ENABLE_INTERACTIVE_EFFECTS:
@@ -682,7 +690,7 @@ def main() -> None:
                 palm_hud.update(palm_pos_for_hud)
                 if palm_hud.is_still and current_mode != "erase": palm_hud.render(frame, palm_pos_pixel)
 
-            # 绘制光标
+            # 光标绘制
             if ui_draw_pt:
                 if brush_manager.tool == "pen":
                     cv2.circle(frame, ui_draw_pt, 6, (0, 255, 255), 2, cv2.LINE_AA)
@@ -692,30 +700,19 @@ def main() -> None:
             if index_tip_pt and gesture_ui.visible:
                 cv2.circle(frame, index_tip_pt, 4, (0, 255, 0), -1, cv2.LINE_AA)
 
-            # FPS
+            # FPS 计算
             frame_count += 1
             if time.time() - last_time >= 1.0:
                 fps = frame_count / (time.time() - last_time)
                 frame_count = 0; last_time = time.time()
 
-            # [UI Update] HUD 逻辑优化
-            # 1. 默认情况下，只显示录制状态 (REC)
+            # HUD 数据更新
             rec_msg = "REC ●" if recorder.is_recording else ""
-            
-            # 2. 如果有 undo_redo_hint (如 "切换: replay_...json" 或 "开始录制")，优先显示它
-            # 3. 如果在 REPLAY 模式，已经在上面设置了 message 显示进度，这里不需要覆盖
-            
             final_msg = ""
-            if undo_redo_hint:
-                final_msg = undo_redo_hint
-            elif rec_msg:
-                final_msg = rec_msg
-            elif APP_MODE == "REPLAY":
-                # 在 REPLAY 模式下不处理，直接使用上面 block 里设置的 hud_data
-                pass 
-            else:
-                # 既没录制，也没操作提示 -> 不显示文件名，保持清爽
-                final_msg = ""
+            if undo_redo_hint: final_msg = undo_redo_hint
+            elif rec_msg: final_msg = rec_msg
+            elif APP_MODE == "REPLAY": pass 
+            else: final_msg = ""
 
             hud_data = {
                 "fps": fps,
@@ -737,7 +734,7 @@ def main() -> None:
         cv2.imshow(config.WINDOW_NAME, frame)
         key = cv2.waitKey(1) & 0xFF
         
-        # ========== 键盘控制 ==========
+        # ==================== 4. 键盘控制 ====================
         if key == ord("q"): break
         if key == 9: # Tab
             APP_MODE = "PPT" if APP_MODE == "DRAW" else "DRAW"
@@ -745,13 +742,12 @@ def main() -> None:
             if APP_MODE == "PPT": pen.end_stroke()
             else: ppt_controller.gesture_history.clear()
 
-        # [新增] 录像文件切换 (N/B)
+        # 录像切换
         if key == ord("n"): # Next
             refresh_recordings()
             if recording_files:
                 current_file_index = (current_file_index + 1) % len(recording_files)
                 fname = os.path.basename(recording_files[current_file_index])
-                # 只在切换时显示 2秒 (由 undo_redo_hint_frames 控制)
                 undo_redo_hint = f"切换: {fname[-15:]}"; undo_redo_hint_frames = 60
         
         if key == ord("b"): # Back
@@ -761,13 +757,13 @@ def main() -> None:
                 fname = os.path.basename(recording_files[current_file_index])
                 undo_redo_hint = f"切换: {fname[-15:]}"; undo_redo_hint_frames = 60
 
-        # [新增] 录像 (R) 与 回放 (P)
+        # 录制与回放
         if key == ord("r"):
             if recorder.is_recording:
                 saved = recorder.stop_recording()
                 undo_redo_hint = "录制已保存"; undo_redo_hint_frames = 60
                 print(f"Saved: {saved}")
-                refresh_recordings() # 保存后刷新列表
+                refresh_recordings()
             else:
                 recorder.start_recording()
                 undo_redo_hint = "开始录制..."; undo_redo_hint_frames = 30
@@ -786,7 +782,6 @@ def main() -> None:
                     if player.load_file(target):
                         APP_MODE = "REPLAY"
                         player.play(speed=1.5)
-                        # 开始播放时显示一下文件名
                         undo_redo_hint = f"回放: {fname[-15:]}"; undo_redo_hint_frames = 60
                     else:
                         undo_redo_hint = "文件损坏"; undo_redo_hint_frames = 30

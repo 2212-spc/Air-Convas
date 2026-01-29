@@ -18,14 +18,38 @@ if TYPE_CHECKING:
 
 class VirtualPen:
     """
-    虚拟钢笔 - 速度感知笔画粗细 + 贝塞尔平滑
+    虚拟钢笔 (VirtualPen)
     
-    钢笔效果原理：
-    - 移动速度快 → 笔画细（模拟轻压）
-    - 移动速度慢 → 笔画粗（模拟重压）
-    - 粗细平滑过渡，避免突变
+    实现真实书写体验的核心类，具备两大特性：
+    1. 速度感知 (Velocity Sensitivity): 移动速度越快，笔画越细（模拟钢笔轻压）；速度越慢，笔画越粗（模拟重压）。
+    2. 曲线平滑 (Curve Smoothing): 使用 4 点滑动窗口和 Catmull-Rom 样条算法，将折线点平滑为连续曲线。
+
+    Attributes:
+        canvas (Canvas): 目标画布对象。
+        brush_manager (BrushManager): 笔刷状态管理器。
+        _window (List): 存储最近 4 个坐标点的滑动窗口，用于计算样条曲线。
     """
     
+    # [Type Hints] 显式声明属性类型
+    canvas: Canvas
+    brush_manager: BrushManager
+    smoothing: Optional[EmaSmoother]
+    jump_threshold: int
+    enable_bezier: bool
+    bezier_segments: int
+    enable_pen_effect: bool
+    min_thickness_ratio: float
+    max_thickness_ratio: float
+    speed_threshold: float
+    thickness_smoothing: float
+    prev_point: Optional[Tuple[int, int]]
+    points: List[Tuple[int, int]]
+    _stroke_broken: bool
+    _window: List[Tuple[int, int]]
+    _last_curve_end: Optional[Tuple[int, int]]
+    _current_thickness: float
+    _last_speed: float
+
     def __init__(
         self,
         canvas: Canvas,
@@ -34,15 +58,28 @@ class VirtualPen:
         jump_threshold: int = 80,
         enable_bezier: bool = True,
         bezier_segments: int = 8,
-        # 钢笔效果参数
         enable_pen_effect: bool = True,
-        min_thickness_ratio: float = 0.4,   # 最细时的粗细比例
-        max_thickness_ratio: float = 1.2,   # 最粗时的粗细比例
-        speed_threshold: float = 30.0,      # 速度阈值（像素/帧）
-        thickness_smoothing: float = 0.3,   # 粗细平滑系数
-        # 形状识别参数
-        enable_shape_recognition: bool = True,  # 启用形状识别
+        min_thickness_ratio: float = 0.4,
+        max_thickness_ratio: float = 1.2,
+        speed_threshold: float = 30.0,
+        thickness_smoothing: float = 0.3,
+        enable_shape_recognition: bool = True,
     ) -> None:
+        """
+        初始化虚拟画笔。
+
+        Args:
+            canvas (Canvas): 绘图画布。
+            brush_manager (BrushManager): 笔刷管理器。
+            smoothing (Optional[EmaSmoother]): 输入坐标的 EMA 平滑器。
+            jump_threshold (int): 防跳变阈值。
+            enable_bezier (bool): 是否启用贝塞尔/Catmull-Rom 平滑。
+            enable_pen_effect (bool): 是否启用速度感知粗细效果。
+            min_thickness_ratio (float): 快速移动时的最小粗细比例。
+            max_thickness_ratio (float): 慢速移动时的最大粗细比例。
+            speed_threshold (float): 达到最小粗细的参考速度。
+            thickness_smoothing (float): 粗细变化的平滑系数 (0.0~1.0)。
+        """
         self.canvas = canvas
         self.brush_manager = brush_manager
         self.smoothing = smoothing
@@ -81,20 +118,20 @@ class VirtualPen:
             self._shape_recognizer = None
         
         # 绘图状态
-        self.prev_point: Optional[Tuple[int, int]] = None
-        self.points: List[Tuple[int, int]] = []
+        self.prev_point = None
+        self.points = []
         self._stroke_broken = False
         
         # 滑动窗口缓冲（最多4个点）
-        self._window: List[Tuple[int, int]] = []
-        self._last_curve_end: Optional[Tuple[int, int]] = None
+        self._window = []
+        self._last_curve_end = None
         
         # 钢笔效果状态
-        self._current_thickness: float = 1.0  # 当前粗细比例
-        self._last_speed: float = 0.0
+        self._current_thickness = 1.0  # 当前粗细比例
+        self._last_speed = 0.0
 
     def start_stroke(self) -> None:
-        """开始新笔画"""
+        """开始新笔画。"""
         self.prev_point = None
         if self.smoothing:
             self.smoothing.reset()
@@ -115,15 +152,23 @@ class VirtualPen:
             self.brush_manager.reset_dash_phase()
 
     def _distance(self, p1: Tuple[int, int], p2: Tuple[int, int]) -> float:
-        """计算两点距离"""
+        """计算两点欧几里得距离。"""
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
     def _calculate_thickness(self, speed: float) -> int:
         """
-        根据速度计算笔画粗细（钢笔效果）
+        根据当前移动速度计算动态笔画粗细。
         
-        速度快 → 细笔画（轻盈）
-        速度慢 → 粗笔画（厚重）
+        算法逻辑：
+        1. 将速度归一化到 (0, speed_threshold) 区间。
+        2. 线性插值计算目标比例 (max_ratio -> min_ratio)。
+        3. 使用指数平滑 (EMA) 平滑粗细变化，避免线条粗细突变。
+        
+        Args:
+            speed (float): 当前两帧之间的移动距离（像素）。
+
+        Returns:
+            int: 计算后的像素粗细值。
         """
         base_thickness = self.brush_manager.thickness
         
@@ -146,7 +191,7 @@ class VirtualPen:
         return max(1, int(base_thickness * self._current_thickness))
 
     def _draw_line_segment(self, pt1: Tuple[int, int], pt2: Tuple[int, int], thickness: int = None) -> None:
-        """绘制一段线条（带圆角连接）"""
+        """绘制原子线段，并自动处理笔刷特效和圆形端点连接。"""
         canvas_img = self.canvas.get_canvas()
         
         if thickness is None:
@@ -162,21 +207,25 @@ class VirtualPen:
             cv2.circle(canvas_img, pt2, radius, color, -1, lineType=cv2.LINE_AA)
 
     def _draw_smooth_segment(self, thickness: int) -> None:
-        """绘制平滑曲线段"""
+        """
+        基于滑动窗口绘制 Catmull-Rom 平滑曲线段。
+        
+        包含“直线保护”逻辑：当检测到 4 点近似共线时，
+        直接绘制直线而非曲线，避免手写小字时笔画被过度平滑扭曲。
+        """
         if len(self._window) < 4:
             return
         
         p0, p1, p2, p3 = self._window[-4], self._window[-3], self._window[-2], self._window[-1]
 
-        # 小字/慢写时常见问题：Catmull-Rom 会把近似直线拉成不自然弧线
-        # 这里加入“直线保护”：四点近似共线时直接画线段，避免弧线化
+        # 直线保护逻辑：计算 p1-p2 偏离 p0-p3 连线的程度
         vx = p3[0] - p0[0]
         vy = p3[1] - p0[1]
         denom = (vx * vx + vy * vy) ** 0.5 + 1e-6
         ux = p2[0] - p1[0]
         uy = p2[1] - p1[1]
         cross = abs(vx * uy - vy * ux)
-        # cross/denom 近似表示“偏离直线的像素量”
+        
         if (cross / denom) < 2.0:
             self._draw_line_segment(p1, p2, thickness)
             self._last_curve_end = p2
@@ -196,10 +245,15 @@ class VirtualPen:
 
     def draw(self, point: Tuple[int, int]) -> Tuple[int, int]:
         """
-        绘制一个点
-        
-        实现钢笔效果：根据移动速度调整笔画粗细
-        同时检测悬停状态（用于形状识别确认）
+        绘制入口函数：实现钢笔效果（根据移动速度调整笔画粗细），
+        同时检测悬停状态（用于形状识别确认）。
+        处理平滑、速度计算、粗细调整、跳变检测，并将点推入滑动窗口以生成曲线。
+
+        Args:
+            point (Tuple[int, int]): 当前帧捕捉到的原始坐标点。
+
+        Returns:
+            Tuple[int, int]: 实际使用的平滑后坐标点。
         """
         if self.smoothing:
             point = tuple(map(int, self.smoothing.push(point)))
@@ -239,14 +293,9 @@ class VirtualPen:
 
         # 位置跳变检测
         if self.prev_point is not None and speed > self.jump_threshold:
-            # raw 点抖动时可能出现瞬时跳变，直接断笔会造成“断断续续”
-            # 分两档处理：
-            # - 中等跳变：画一段直线桥接，避免断笔
-            # - 巨大跳变：真正断笔（避免跨屏长线）
             hard_break = self.jump_threshold * 2
             if speed <= hard_break:
                 self._draw_line_segment(self.prev_point, point, thickness)
-                # 继续笔画，但重置曲线窗口，避免曲线形变
                 self._window = [point]
                 self._last_curve_end = point
             else:
@@ -264,9 +313,8 @@ class VirtualPen:
         # 绘制策略
         if self.enable_bezier:
             if len(self._window) == 1:
-                # 第1个点：画起始圆点（所有笔刷类型都需要起始点）
+                # 第1个点：画起始圆点
                 canvas_img = self.canvas.get_canvas()
-                # 虚线使用加粗的起始点（与虚线粗细一致）
                 if self.brush_manager.brush_type == "dashed":
                     dashed_thickness = thickness + max(2, int(thickness * 0.3))
                     radius = max(1, dashed_thickness // 2)
@@ -297,8 +345,7 @@ class VirtualPen:
 
     def end_stroke(self) -> List[Tuple[int, int]]:
         """
-        结束笔画
-        
+        结束笔画：绘制剩余的曲线缓冲段。
         如果启用形状识别，会尝试识别并优化手绘形状：
         - 圆形 → 标准圆
         - 矩形 → 标准矩形
@@ -414,13 +461,15 @@ class VirtualPen:
 
     @property
     def was_stroke_broken(self) -> bool:
+        """bool: 上一帧是否发生了笔画中断（大跳变）。"""
         return self._stroke_broken
     
     @property
     def current_stroke_length(self) -> int:
+        """int: 当前笔画包含的点数。"""
         return len(self.points)
     
     @property
     def current_thickness(self) -> float:
-        """返回当前粗细比例（用于UI显示）"""
+        """返回当前粗细比例（用于UI显示）。"""
         return self._current_thickness

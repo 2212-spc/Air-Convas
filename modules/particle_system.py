@@ -1,23 +1,53 @@
 # -*- coding: utf-8 -*-
-"""粒子系统模块 - 为手指移动添加拖尾粒子效果"""
+"""
+粒子系统模块 (Particle System)
 
-from typing import List, Tuple
+实现基于物理的 2D 粒子效果，用于增强手指移动时的视觉反馈（拖尾）。
+包含简单的牛顿物理模拟（速度、重力）和生命周期管理。
+"""
+
+from typing import List, Tuple, Optional, NewType
+
 import numpy as np
 import cv2
 
+# [Type Hints] 定义物理计算相关的类型别名
+Vector2D = np.ndarray           # 二维向量 [x, y] (float32)
+ColorRGB = Tuple[int, int, int] # 颜色元组 (B, G, R)
+Position = Tuple[int, int]      # 屏幕坐标 (x, y)
+
 
 class Particle:
-    """单个粒子"""
+    """
+    单个粒子实体 (Particle Entity)
+    
+    使用 __slots__ 优化内存布局，避免为每个粒子创建 __dict__。
+    这对于每帧需要更新和渲染数百个对象的系统至关重要。
+
+    Attributes:
+        position (Vector2D): 当前位置 [x, y]。
+        velocity (Vector2D): 当前速度向量 [vx, vy]。
+        lifetime (float): 剩余生命周期 (秒)。当 < 0 时粒子消亡。
+        color (ColorRGB): 粒子基色。
+        size (float): 当前渲染半径。
+    """
     __slots__ = ['position', 'velocity', 'lifetime', 'color', 'size']
+    
+    # [Type Hints] 显式声明 __slots__ 属性类型
+    position: Vector2D
+    velocity: Vector2D
+    lifetime: float
+    color: ColorRGB
+    size: float
 
     def __init__(
         self,
         position: Tuple[float, float],
         velocity: Tuple[float, float],
         lifetime: float,
-        color: Tuple[int, int, int],
+        color: ColorRGB,
         size: float
-    ):
+    ) -> None:
         self.position = np.array(position, dtype=np.float32)
         self.velocity = np.array(velocity, dtype=np.float32)
         self.lifetime = lifetime
@@ -26,7 +56,27 @@ class Particle:
 
 
 class ParticleSystem:
-    """粒子系统 - 为手指移动添加拖尾效果"""
+    """
+    粒子系统管理器 (ParticleSystem)
+    
+    核心特性：
+    1. 对象池管理：自动回收死亡粒子，限制最大数量。
+    2. 物理模拟：应用重力加速度 (Gravity) 和阻力/衰减 (Fade Rate)。
+    3. 视觉渲染：使用多层同心圆模拟发光 (Glow) 效果。
+
+    Attributes:
+        max_particles (int): 场景中允许存在的最大粒子数。
+        emit_count (int): 每次触发发射时产生的粒子数量。
+        gravity (float): 垂直方向的重力加速度分量。
+        fade_rate (float): 粒子大小的每帧衰减系数 (0.0~1.0)。
+    """
+
+    # [Type Hints] 系统参数类型定义
+    max_particles: int
+    emit_count: int
+    gravity: float
+    fade_rate: float
+    particles: List[Particle]
 
     def __init__(
         self,
@@ -34,18 +84,36 @@ class ParticleSystem:
         emit_count: int = 5,
         gravity: float = 0.1,
         fade_rate: float = 0.98
-    ):
+    ) -> None:
+        """
+        初始化粒子系统。
+
+        Args:
+            max_particles (int): 最大粒子容量。
+            emit_count (int): 单次发射量。
+            gravity (float): 重力参数 (正值向下)。
+            fade_rate (float): 衰减系数 (例如 0.98 代表每帧缩小 2%)。
+        """
         self.max_particles = max_particles
         self.emit_count = emit_count
         self.gravity = gravity
         self.fade_rate = fade_rate
-        self.particles: List[Particle] = []
+        self.particles = []
 
-    def emit(self, position: Tuple[int, int], color: Tuple[int, int, int]) -> None:
-        """在指定位置发射粒子"""
+    def emit(self, position: Position, color: ColorRGB) -> None:
+        """
+        在指定位置发射一组新粒子。
+        
+        粒子会被赋予随机的初速度方向、大小和生命周期，
+        并对基础颜色进行微小的随机扰动，以产生自然的色彩丰富度。
+
+        Args:
+            position (Position): 发射源坐标 (x, y)。
+            color (ColorRGB): 粒子的基础颜色 (B, G, R)。
+        """
         # 防止粒子数量过多
         if len(self.particles) >= self.max_particles:
-            # 移除最老的粒子腾出空间
+            # 移除最老的粒子腾出空间 (FIFO 策略)
             num_to_remove = self.emit_count
             if len(self.particles) > self.max_particles - num_to_remove:
                 self.particles = self.particles[num_to_remove:]
@@ -65,7 +133,7 @@ class ParticleSystem:
             # 随机大小
             size = np.random.uniform(2.0, 5.0)
 
-            # 颜色带随机变化
+            # 颜色带随机变化 (Color Jitter)
             r, g, b = color
             color_var = (
                 max(0, min(255, r + np.random.randint(-30, 30))),
@@ -83,9 +151,19 @@ class ParticleSystem:
             self.particles.append(particle)
 
     def update(self, dt: float = 0.016) -> None:
-        """更新所有粒子状态"""
-        # 向量化更新（更高效）
-        alive_particles = []
+        """
+        更新物理状态。
+
+        包含：
+        1. 位置更新 (p = p + v)
+        2. 速度更新 (v.y = v.y + g)
+        3. 生命周期与大小衰减
+        4. 清理死亡粒子
+
+        Args:
+            dt (float): 时间步长（当前版本未使用，预留接口）。
+        """
+        alive_particles: List[Particle] = []
 
         for particle in self.particles:
             # 更新位置
@@ -107,7 +185,16 @@ class ParticleSystem:
         self.particles = alive_particles
 
     def render(self, frame: np.ndarray) -> None:
-        """渲染所有粒子到画面"""
+        """
+        将粒子渲染到 OpenCV 帧上。
+
+        使用 Alpha Blending 模拟发光效果：
+        根据剩余生命周期计算透明度，绘制多层不同大小和透明度的圆，
+        形成中心亮、边缘柔和的光晕效果。
+
+        Args:
+            frame (np.ndarray): 目标图像帧。
+        """
         h, w = frame.shape[:2]
 
         for particle in self.particles:
@@ -123,7 +210,6 @@ class ParticleSystem:
                 continue
 
             # 绘制发光效果（多层圆）
-            # 使用 try-except 防止绘制时的边界问题
             try:
                 # 外层（半透明大圆）
                 outer_color = tuple(int(c * alpha * 0.3) for c in particle.color)
@@ -137,7 +223,6 @@ class ParticleSystem:
                 inner_color = tuple(int(c * alpha) for c in particle.color)
                 cv2.circle(frame, (x, y), radius, inner_color, -1, lineType=cv2.LINE_AA)
             except Exception:
-                # 忽略绘制错误，继续处理其他粒子
                 continue
 
     def clear(self) -> None:
